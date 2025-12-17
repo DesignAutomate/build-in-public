@@ -18,8 +18,8 @@ interface UserSettings {
   business_name: string
   business_description: string
   brand_voice: string
-  target_audience: string
-  audience_interests: string
+  audience_description: string
+  audience_interests: string // stored as comma-separated in UI, converted to array for DB
   notification_email: string
 }
 
@@ -27,7 +27,7 @@ const defaultSettings: UserSettings = {
   business_name: '',
   business_description: '',
   brand_voice: '',
-  target_audience: '',
+  audience_description: '',
   audience_interests: '',
   notification_email: '',
 }
@@ -59,12 +59,16 @@ export default function SettingsPage() {
       }
 
       if (data) {
+        // Convert audience_interests array to comma-separated string for display
+        const interestsArray = data.audience_interests as string[] | null
+        const interestsString = interestsArray ? interestsArray.join(', ') : ''
+
         setSettings({
           business_name: data.business_name || '',
           business_description: data.business_description || '',
           brand_voice: data.brand_voice || '',
-          target_audience: data.target_audience || '',
-          audience_interests: data.audience_interests || '',
+          audience_description: data.audience_description || '',
+          audience_interests: interestsString,
           notification_email: data.notification_email || user.email || '',
         })
       } else {
@@ -88,23 +92,49 @@ export default function SettingsPage() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) throw new Error('Not authenticated')
 
-      const { error } = await supabase
+      // Convert comma-separated interests to array, trimming whitespace
+      const interestsArray = settings.audience_interests
+        .split(',')
+        .map(interest => interest.trim())
+        .filter(interest => interest.length > 0)
+
+      const payload = {
+        user_id: user.id,
+        business_name: settings.business_name,
+        business_description: settings.business_description,
+        brand_voice: settings.brand_voice,
+        audience_description: settings.audience_description,
+        audience_interests: interestsArray,
+        notification_email: settings.notification_email,
+        updated_at: new Date().toISOString(),
+      }
+
+      console.log('Saving settings with payload:', payload)
+
+      const { data, error } = await supabase
         .from('user_settings')
-        .upsert({
-          user_id: user.id,
-          ...settings,
-          updated_at: new Date().toISOString(),
-        }, {
+        .upsert(payload, {
           onConflict: 'user_id',
         })
+        .select()
 
-      if (error) throw error
+      if (error) {
+        console.error('Supabase error details:', {
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          code: error.code,
+        })
+        throw error
+      }
 
+      console.log('Settings saved successfully:', data)
       setMessage({ type: 'success', text: 'Settings saved successfully!' })
       setTimeout(() => setMessage(null), 4000)
     } catch (error) {
       console.error('Error saving settings:', error)
-      setMessage({ type: 'error', text: 'Failed to save settings. Please try again.' })
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      setMessage({ type: 'error', text: `Failed to save settings: ${errorMessage}` })
     } finally {
       setSaving(false)
     }
@@ -129,7 +159,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="space-y-8 max-w-3xl">
+    <div className="space-y-10 max-w-4xl">
       {/* Page header */}
       <header className="animate-fade-in-up">
         <div className="flex items-center gap-2 mb-2">
@@ -179,22 +209,22 @@ export default function SettingsPage() {
       )}
 
       {/* Settings sections */}
-      <div className="space-y-6">
+      <div className="space-y-8">
         {/* Section 1: Your Business */}
         <section
-          className="p-6 rounded-2xl animate-fade-in-up-delay-1"
+          className="p-8 rounded-2xl animate-fade-in-up-delay-1"
           style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}
         >
-          <div className="flex items-center gap-3 mb-6">
+          <div className="flex items-center gap-3 mb-8">
             <div
-              className="w-10 h-10 rounded-xl flex items-center justify-center"
+              className="w-12 h-12 rounded-xl flex items-center justify-center"
               style={{ background: 'rgba(255, 107, 107, 0.15)' }}
             >
-              <Building2 className="w-5 h-5" style={{ color: 'var(--accent-coral)' }} />
+              <Building2 className="w-6 h-6" style={{ color: 'var(--accent-coral)' }} />
             </div>
             <div>
               <h2
-                className="text-lg font-semibold"
+                className="text-xl font-semibold"
                 style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}
               >
                 Your Business
@@ -205,10 +235,10 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          <div className="space-y-5">
+          <div className="space-y-6">
             <div>
               <label
-                className="block text-sm font-medium mb-2"
+                className="block text-sm font-medium mb-3"
                 style={{ color: 'var(--text-secondary)' }}
               >
                 Business Name
@@ -218,7 +248,7 @@ export default function SettingsPage() {
                 value={settings.business_name}
                 onChange={(e) => updateField('business_name', e.target.value)}
                 placeholder="e.g., Acme Studios"
-                className="w-full px-4 py-3 rounded-xl text-sm transition-all duration-200 focus:ring-2"
+                className="w-full px-5 py-4 rounded-xl text-base transition-all duration-200 focus:ring-2 focus:ring-[var(--accent-coral)]"
                 style={{
                   background: 'var(--bg-elevated)',
                   border: '1px solid var(--border-default)',
@@ -229,7 +259,7 @@ export default function SettingsPage() {
 
             <div>
               <label
-                className="block text-sm font-medium mb-2"
+                className="block text-sm font-medium mb-3"
                 style={{ color: 'var(--text-secondary)' }}
               >
                 Business Description
@@ -238,8 +268,8 @@ export default function SettingsPage() {
                 value={settings.business_description}
                 onChange={(e) => updateField('business_description', e.target.value)}
                 placeholder="Describe what your business does, your mission, and what makes it unique..."
-                rows={3}
-                className="w-full px-4 py-3 rounded-xl text-sm resize-none transition-all duration-200 focus:ring-2"
+                rows={4}
+                className="w-full px-5 py-4 rounded-xl text-base resize-y transition-all duration-200 focus:ring-2 focus:ring-[var(--accent-coral)] min-h-[120px]"
                 style={{
                   background: 'var(--bg-elevated)',
                   border: '1px solid var(--border-default)',
@@ -252,19 +282,19 @@ export default function SettingsPage() {
 
         {/* Section 2: Brand Voice */}
         <section
-          className="p-6 rounded-2xl animate-fade-in-up-delay-2"
+          className="p-8 rounded-2xl animate-fade-in-up-delay-2"
           style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}
         >
-          <div className="flex items-center gap-3 mb-6">
+          <div className="flex items-center gap-3 mb-8">
             <div
-              className="w-10 h-10 rounded-xl flex items-center justify-center"
+              className="w-12 h-12 rounded-xl flex items-center justify-center"
               style={{ background: 'rgba(45, 212, 191, 0.15)' }}
             >
-              <MessageSquare className="w-5 h-5" style={{ color: 'var(--accent-teal)' }} />
+              <MessageSquare className="w-6 h-6" style={{ color: 'var(--accent-teal)' }} />
             </div>
             <div>
               <h2
-                className="text-lg font-semibold"
+                className="text-xl font-semibold"
                 style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}
               >
                 Brand Voice
@@ -275,10 +305,10 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          <div className="space-y-5">
+          <div className="space-y-6">
             <div>
               <label
-                className="block text-sm font-medium mb-2"
+                className="block text-sm font-medium mb-3"
                 style={{ color: 'var(--text-secondary)' }}
               >
                 Brand Voice
@@ -287,8 +317,8 @@ export default function SettingsPage() {
                 value={settings.brand_voice}
                 onChange={(e) => updateField('brand_voice', e.target.value)}
                 placeholder="e.g., Professional yet approachable, with a touch of humor. We explain complex topics simply and celebrate wins openly..."
-                rows={3}
-                className="w-full px-4 py-3 rounded-xl text-sm resize-none transition-all duration-200 focus:ring-2"
+                rows={6}
+                className="w-full px-5 py-4 rounded-xl text-base resize-y transition-all duration-200 focus:ring-2 focus:ring-[var(--accent-teal)] min-h-[160px]"
                 style={{
                   background: 'var(--bg-elevated)',
                   border: '1px solid var(--border-default)',
@@ -299,17 +329,17 @@ export default function SettingsPage() {
 
             <div>
               <label
-                className="block text-sm font-medium mb-2"
+                className="block text-sm font-medium mb-3"
                 style={{ color: 'var(--text-secondary)' }}
               >
-                Target Audience
+                Audience Description
               </label>
               <textarea
-                value={settings.target_audience}
-                onChange={(e) => updateField('target_audience', e.target.value)}
+                value={settings.audience_description}
+                onChange={(e) => updateField('audience_description', e.target.value)}
                 placeholder="e.g., Indie hackers, startup founders, and developers who want to grow their audience while building products..."
-                rows={3}
-                className="w-full px-4 py-3 rounded-xl text-sm resize-none transition-all duration-200 focus:ring-2"
+                rows={6}
+                className="w-full px-5 py-4 rounded-xl text-base resize-y transition-all duration-200 focus:ring-2 focus:ring-[var(--accent-teal)] min-h-[160px]"
                 style={{
                   background: 'var(--bg-elevated)',
                   border: '1px solid var(--border-default)',
@@ -322,19 +352,19 @@ export default function SettingsPage() {
 
         {/* Section 3: Audience Interests */}
         <section
-          className="p-6 rounded-2xl animate-fade-in-up-delay-3"
+          className="p-8 rounded-2xl animate-fade-in-up-delay-3"
           style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}
         >
-          <div className="flex items-center gap-3 mb-6">
+          <div className="flex items-center gap-3 mb-8">
             <div
-              className="w-10 h-10 rounded-xl flex items-center justify-center"
+              className="w-12 h-12 rounded-xl flex items-center justify-center"
               style={{ background: 'rgba(245, 158, 11, 0.15)' }}
             >
-              <Users className="w-5 h-5" style={{ color: 'var(--accent-amber)' }} />
+              <Users className="w-6 h-6" style={{ color: 'var(--accent-amber)' }} />
             </div>
             <div>
               <h2
-                className="text-lg font-semibold"
+                className="text-xl font-semibold"
                 style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}
               >
                 Audience Interests
@@ -347,44 +377,44 @@ export default function SettingsPage() {
 
           <div>
             <label
-              className="block text-sm font-medium mb-2"
+              className="block text-sm font-medium mb-3"
               style={{ color: 'var(--text-secondary)' }}
             >
               Interests (comma-separated)
             </label>
-            <input
-              type="text"
+            <textarea
               value={settings.audience_interests}
               onChange={(e) => updateField('audience_interests', e.target.value)}
-              placeholder="e.g., SaaS, product development, growth hacking, remote work, AI tools"
-              className="w-full px-4 py-3 rounded-xl text-sm transition-all duration-200 focus:ring-2"
+              placeholder="e.g., SaaS, product development, growth hacking, remote work, AI tools, indie hacking, bootstrapping"
+              rows={4}
+              className="w-full px-5 py-4 rounded-xl text-base resize-y transition-all duration-200 focus:ring-2 focus:ring-[var(--accent-amber)] min-h-[120px]"
               style={{
                 background: 'var(--bg-elevated)',
                 border: '1px solid var(--border-default)',
                 color: 'var(--text-primary)',
               }}
             />
-            <p className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
-              These help generate relevant content ideas for your audience
+            <p className="mt-3 text-sm" style={{ color: 'var(--text-muted)' }}>
+              These help generate relevant content ideas for your audience. Separate each interest with a comma.
             </p>
           </div>
         </section>
 
         {/* Section 4: Notifications */}
         <section
-          className="p-6 rounded-2xl animate-fade-in-up-delay-3"
+          className="p-8 rounded-2xl animate-fade-in-up-delay-3"
           style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}
         >
-          <div className="flex items-center gap-3 mb-6">
+          <div className="flex items-center gap-3 mb-8">
             <div
-              className="w-10 h-10 rounded-xl flex items-center justify-center"
+              className="w-12 h-12 rounded-xl flex items-center justify-center"
               style={{ background: 'rgba(255, 107, 107, 0.15)' }}
             >
-              <Bell className="w-5 h-5" style={{ color: 'var(--accent-coral)' }} />
+              <Bell className="w-6 h-6" style={{ color: 'var(--accent-coral)' }} />
             </div>
             <div>
               <h2
-                className="text-lg font-semibold"
+                className="text-xl font-semibold"
                 style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}
               >
                 Notifications
@@ -397,7 +427,7 @@ export default function SettingsPage() {
 
           <div>
             <label
-              className="block text-sm font-medium mb-2"
+              className="block text-sm font-medium mb-3"
               style={{ color: 'var(--text-secondary)' }}
             >
               Email Address
@@ -407,7 +437,7 @@ export default function SettingsPage() {
               value={settings.notification_email}
               onChange={(e) => updateField('notification_email', e.target.value)}
               placeholder="your@email.com"
-              className="w-full px-4 py-3 rounded-xl text-sm transition-all duration-200 focus:ring-2"
+              className="w-full px-5 py-4 rounded-xl text-base transition-all duration-200 focus:ring-2 focus:ring-[var(--accent-coral)]"
               style={{
                 background: 'var(--bg-elevated)',
                 border: '1px solid var(--border-default)',
@@ -419,11 +449,11 @@ export default function SettingsPage() {
       </div>
 
       {/* Save button */}
-      <div className="flex justify-end pt-4">
+      <div className="flex justify-end pt-6 pb-8">
         <button
           onClick={handleSave}
           disabled={saving}
-          className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold transition-all duration-200 hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+          className="inline-flex items-center gap-3 px-8 py-4 rounded-xl text-base font-semibold transition-all duration-200 hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
           style={{
             background: 'linear-gradient(135deg, var(--accent-coral), var(--accent-coral-hover))',
             color: 'white',
@@ -432,12 +462,12 @@ export default function SettingsPage() {
         >
           {saving ? (
             <>
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <Loader2 className="w-5 h-5 animate-spin" />
               Saving...
             </>
           ) : (
             <>
-              <Save className="w-4 h-4" />
+              <Save className="w-5 h-5" />
               Save Settings
             </>
           )}
