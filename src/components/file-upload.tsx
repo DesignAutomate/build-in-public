@@ -83,52 +83,81 @@ export default function FileUpload({ userId, files, onFilesChange }: FileUploadP
   const handlePasteFromClipboard = async () => {
     setPasteError(null)
 
+    console.log('=== CLIPBOARD DEBUG START ===')
+    console.log('navigator.clipboard available:', !!navigator.clipboard)
+    console.log('navigator.clipboard.read available:', !!(navigator.clipboard?.read))
+
     try {
       // Check if clipboard API is available
       if (!navigator.clipboard || !navigator.clipboard.read) {
-        setPasteError('Clipboard API not available. Copy an image, then press Ctrl+V (Cmd+V on Mac) to paste.')
+        console.log('Clipboard API not available')
+        setPasteError('Clipboard API not available. Press Ctrl+V (Cmd+V on Mac) to paste instead.')
         setTimeout(() => setPasteError(null), 5000)
         return
       }
 
+      console.log('Attempting to read clipboard...')
       const clipboardItems = await navigator.clipboard.read()
+      console.log('Clipboard items count:', clipboardItems.length)
+
       const imageFiles: File[] = []
 
-      for (const item of clipboardItems) {
+      for (let i = 0; i < clipboardItems.length; i++) {
+        const item = clipboardItems[i]
+        console.log(`Item ${i} types:`, item.types)
+
         // Look for image types in the clipboard item
         const imageTypes = item.types.filter(type => type.startsWith('image/'))
+        console.log(`Item ${i} image types:`, imageTypes)
+
         if (imageTypes.length > 0) {
-          const blob = await item.getType(imageTypes[0])
-          const timestamp = Date.now()
-          const extension = imageTypes[0].split('/')[1] || 'png'
-          const file = new File([blob], `clipboard_${timestamp}.${extension}`, { type: imageTypes[0] })
-          imageFiles.push(file)
+          try {
+            const blob = await item.getType(imageTypes[0])
+            console.log(`Got blob for ${imageTypes[0]}, size:`, blob.size)
+            const timestamp = Date.now()
+            const extension = imageTypes[0].split('/')[1] || 'png'
+            const file = new File([blob], `clipboard_${timestamp}.${extension}`, { type: imageTypes[0] })
+            imageFiles.push(file)
+          } catch (blobError) {
+            console.error(`Failed to get blob for ${imageTypes[0]}:`, blobError)
+          }
+        }
+
+        // Also check for text/html which might contain image data
+        if (item.types.includes('text/html')) {
+          console.log('Found text/html in clipboard - might contain image reference')
         }
       }
 
+      console.log('Total image files found:', imageFiles.length)
+
       if (imageFiles.length === 0) {
-        setPasteError('No images in clipboard. Copy an image first, or drag and drop a file.')
+        setPasteError('No images in clipboard. Copy an image first, or press Ctrl+V to paste.')
         setTimeout(() => setPasteError(null), 4000)
         return
       }
 
       await handleFilesUpload(imageFiles)
+      console.log('=== CLIPBOARD DEBUG END - SUCCESS ===')
     } catch (error) {
-      console.error('Clipboard paste error:', error)
+      console.error('=== CLIPBOARD DEBUG ERROR ===')
+      console.error('Error name:', error instanceof Error ? error.name : 'unknown')
+      console.error('Error message:', error instanceof Error ? error.message : String(error))
+      console.error('Full error:', error)
 
       // Provide specific error messages based on the error type
-      let errorMessage = 'Could not access clipboard. '
+      let errorMessage = ''
 
       if (error instanceof Error) {
         if (error.name === 'NotAllowedError') {
-          errorMessage += 'Permission denied. Try pressing Ctrl+V (Cmd+V on Mac) instead.'
+          errorMessage = 'Clipboard access denied. Press Ctrl+V (Cmd+V on Mac) to paste instead.'
         } else if (error.name === 'NotFoundError') {
-          errorMessage += 'No image found. Copy an image first.'
+          errorMessage = 'No image in clipboard. Copy an image first, then press Ctrl+V.'
         } else {
-          errorMessage += 'Press Ctrl+V (Cmd+V on Mac) to paste, or drag and drop the image.'
+          errorMessage = `Clipboard error: ${error.message}. Try pressing Ctrl+V instead.`
         }
       } else {
-        errorMessage += 'Press Ctrl+V (Cmd+V on Mac) to paste, or drag and drop the image.'
+        errorMessage = 'Could not access clipboard. Press Ctrl+V (Cmd+V on Mac) to paste.'
       }
 
       setPasteError(errorMessage)
@@ -171,21 +200,24 @@ export default function FileUpload({ userId, files, onFilesChange }: FileUploadP
 
       if (error) throw error
 
-      // Get public URL
-      const { data: urlData } = supabase.storage
-        .from('uploads')
-        .getPublicUrl(filePath)
+      // Get public URL - construct it directly to ensure correct format
+      const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://soalrvabjfhujvaxlbcm.supabase.co'
+      const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/uploads/${filePath}`
+
+      console.log('=== FILE UPLOAD DEBUG ===')
+      console.log('File path:', filePath)
+      console.log('Public URL:', publicUrl)
 
       const isImage = ACCEPTED_IMAGE_TYPES.includes(file.type)
 
       return {
         id: `temp_${timestamp}_${Math.random().toString(36).slice(2)}`,
         file_name: file.name,
-        file_url: urlData.publicUrl,
+        file_url: publicUrl,
         file_type: file.type,
         file_size: file.size,
         user_context: '',
-        preview_url: isImage ? urlData.publicUrl : undefined,
+        preview_url: isImage ? publicUrl : undefined,
       }
     } catch (error) {
       console.error('Upload error:', error)

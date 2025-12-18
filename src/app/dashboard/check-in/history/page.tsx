@@ -18,8 +18,12 @@ import {
   Meh,
   Frown,
   FileVideo,
+  ImageOff,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+
+// Supabase project URL for constructing storage URLs
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://soalrvabjfhujvaxlbcm.supabase.co'
 
 interface CheckIn {
   id: string
@@ -85,13 +89,27 @@ export default function CheckInHistoryPage() {
 
   // Helper to get proper image URL from Supabase storage
   const getImageUrl = (fileUrl: string): string => {
+    console.log('=== getImageUrl DEBUG ===')
+    console.log('Input fileUrl:', fileUrl)
+
     // If it's already a full URL (contains http), use it directly
     if (fileUrl.startsWith('http')) {
+      console.log('Already full URL, returning as-is')
       return fileUrl
     }
-    // Otherwise, treat it as a storage path and get the public URL
-    const { data } = supabase.storage.from('uploads').getPublicUrl(fileUrl)
-    return data.publicUrl
+
+    // Otherwise, construct the full public URL
+    const fullUrl = `${SUPABASE_URL}/storage/v1/object/public/uploads/${fileUrl}`
+    console.log('Constructed URL:', fullUrl)
+    return fullUrl
+  }
+
+  // Track failed images
+  const [failedImages, setFailedImages] = useState<Set<string>>(new Set())
+
+  const handleImageError = (uploadId: string) => {
+    console.log('Image failed to load:', uploadId)
+    setFailedImages(prev => new Set(prev).add(uploadId))
   }
 
   const loadCheckIns = async () => {
@@ -418,12 +436,17 @@ export default function CheckInHistoryPage() {
                                 className="relative w-16 h-16 rounded-lg overflow-hidden flex-shrink-0"
                                 style={{ background: 'var(--bg-elevated)' }}
                               >
-                                {upload.file_type.startsWith('image/') ? (
+                                {upload.file_type.startsWith('image/') && !failedImages.has(upload.id) ? (
                                   <img
                                     src={getImageUrl(upload.file_url)}
                                     alt=""
                                     className="w-full h-full object-cover"
+                                    onError={() => handleImageError(upload.id)}
                                   />
+                                ) : upload.file_type.startsWith('image/') && failedImages.has(upload.id) ? (
+                                  <div className="w-full h-full flex items-center justify-center" style={{ background: 'var(--bg-card)' }}>
+                                    <ImageOff className="w-6 h-6" style={{ color: 'var(--text-muted)' }} />
+                                  </div>
                                 ) : (
                                   <div className="w-full h-full flex items-center justify-center">
                                     <FileVideo className="w-6 h-6" style={{ color: 'var(--text-muted)' }} />

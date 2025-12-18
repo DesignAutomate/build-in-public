@@ -23,8 +23,12 @@ import {
   Trash2,
   X,
   FileVideo,
+  ImageOff,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+
+// Supabase project URL for constructing storage URLs
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://soalrvabjfhujvaxlbcm.supabase.co'
 
 type CheckInType = 'morning' | 'midday' | 'evening'
 type Mood = 'great' | 'good' | 'okay' | 'struggling' | null
@@ -103,6 +107,7 @@ export default function CheckInDetailPage() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [selectedImage, setSelectedImage] = useState<Upload | null>(null)
+  const [failedImages, setFailedImages] = useState<Set<string>>(new Set())
 
   const supabase = createClient()
 
@@ -112,11 +117,23 @@ export default function CheckInDetailPage() {
 
   // Helper to get proper image URL from Supabase storage
   const getImageUrl = (fileUrl: string): string => {
+    console.log('=== getImageUrl DEBUG (detail page) ===')
+    console.log('Input fileUrl:', fileUrl)
+
     if (fileUrl.startsWith('http')) {
+      console.log('Already full URL, returning as-is')
       return fileUrl
     }
-    const { data } = supabase.storage.from('uploads').getPublicUrl(fileUrl)
-    return data.publicUrl
+
+    // Construct the full public URL
+    const fullUrl = `${SUPABASE_URL}/storage/v1/object/public/uploads/${fileUrl}`
+    console.log('Constructed URL:', fullUrl)
+    return fullUrl
+  }
+
+  const handleImageError = (uploadId: string) => {
+    console.log('Image failed to load:', uploadId)
+    setFailedImages(prev => new Set(prev).add(uploadId))
   }
 
   const loadCheckIn = async () => {
@@ -524,15 +541,21 @@ export default function CheckInDetailPage() {
                 key={upload.id}
                 className="relative rounded-xl overflow-hidden cursor-pointer group"
                 style={{ background: 'var(--bg-elevated)' }}
-                onClick={() => upload.file_type.startsWith('image/') && setSelectedImage(upload)}
+                onClick={() => upload.file_type.startsWith('image/') && !failedImages.has(upload.id) && setSelectedImage(upload)}
               >
                 <div className="aspect-square">
-                  {upload.file_type.startsWith('image/') ? (
+                  {upload.file_type.startsWith('image/') && !failedImages.has(upload.id) ? (
                     <img
                       src={getImageUrl(upload.file_url)}
                       alt={upload.file_name}
                       className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
+                      onError={() => handleImageError(upload.id)}
                     />
+                  ) : upload.file_type.startsWith('image/') && failedImages.has(upload.id) ? (
+                    <div className="w-full h-full flex flex-col items-center justify-center" style={{ background: 'var(--bg-card)' }}>
+                      <ImageOff className="w-8 h-8 mb-2" style={{ color: 'var(--text-muted)' }} />
+                      <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Failed to load</span>
+                    </div>
                   ) : (
                     <div className="w-full h-full flex items-center justify-center" style={{ background: 'var(--bg-card)' }}>
                       <FileVideo className="w-12 h-12" style={{ color: 'var(--text-muted)' }} />
