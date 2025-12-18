@@ -29,7 +29,7 @@ interface ProjectData {
   target_audience: string
   content_angle: string
   technologies: string
-  target_completion_date: string
+  target_completion: string
   status: 'active' | 'paused' | 'completed'
   progress_percentage: number
 }
@@ -42,7 +42,7 @@ const defaultProject: ProjectData = {
   target_audience: '',
   content_angle: '',
   technologies: '',
-  target_completion_date: '',
+  target_completion: '',
   status: 'active',
   progress_percentage: 0,
 }
@@ -90,7 +90,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         target_audience: data.target_audience || '',
         content_angle: data.content_angle || '',
         technologies: techString,
-        target_completion_date: data.target_completion_date || '',
+        target_completion: data.target_completion || '',
         status: data.status || 'active',
         progress_percentage: data.progress_percentage || 0,
       })
@@ -124,7 +124,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         target_audience: project.target_audience.trim() || null,
         content_angle: project.content_angle.trim() || null,
         technologies: technologiesArray.length > 0 ? technologiesArray : null,
-        target_completion_date: project.target_completion_date || null,
+        target_completion: project.target_completion || null,
         status: project.status,
         progress_percentage: project.progress_percentage,
         updated_at: new Date().toISOString(),
@@ -455,8 +455,8 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
               </label>
               <input
                 type="date"
-                value={project.target_completion_date}
-                onChange={(e) => updateField('target_completion_date', e.target.value)}
+                value={project.target_completion}
+                onChange={(e) => updateField('target_completion', e.target.value)}
                 className="w-full px-5 py-4 rounded-xl text-base transition-all duration-200 focus:ring-2 focus:ring-[var(--accent-teal)]"
                 style={{
                   background: 'var(--bg-elevated)',

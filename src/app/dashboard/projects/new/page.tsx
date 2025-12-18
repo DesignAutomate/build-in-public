@@ -24,7 +24,7 @@ interface ProjectForm {
   target_audience: string
   content_angle: string
   technologies: string
-  target_completion_date: string
+  target_completion: string
 }
 
 const defaultForm: ProjectForm = {
@@ -34,7 +34,7 @@ const defaultForm: ProjectForm = {
   target_audience: '',
   content_angle: '',
   technologies: '',
-  target_completion_date: '',
+  target_completion: '',
 }
 
 export default function NewProjectPage() {
@@ -77,7 +77,7 @@ export default function NewProjectPage() {
         target_audience: form.target_audience.trim() || null,
         content_angle: form.content_angle.trim() || null,
         technologies: technologiesArray.length > 0 ? technologiesArray : null,
-        target_completion_date: form.target_completion_date || null,
+        target_completion: form.target_completion || null,
         status: 'active',
         progress_percentage: 0,
       }
@@ -282,8 +282,8 @@ export default function NewProjectPage() {
                 </label>
                 <input
                   type="date"
-                  value={form.target_completion_date}
-                  onChange={(e) => updateField('target_completion_date', e.target.value)}
+                  value={form.target_completion}
+                  onChange={(e) => updateField('target_completion', e.target.value)}
                   className="w-full px-5 py-4 rounded-xl text-base transition-all duration-200 focus:ring-2 focus:ring-[var(--accent-teal)]"
                   style={{
                     background: 'var(--bg-elevated)',
