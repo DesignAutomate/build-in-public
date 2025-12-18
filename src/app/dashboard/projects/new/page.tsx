@@ -23,7 +23,7 @@ interface ProjectForm {
   goals: string
   target_audience: string
   content_angle: string
-  technologies: string
+  technologies_used: string
   target_completion: string
 }
 
@@ -33,7 +33,7 @@ const defaultForm: ProjectForm = {
   goals: '',
   target_audience: '',
   content_angle: '',
-  technologies: '',
+  technologies_used: '',
   target_completion: '',
 }
 
@@ -63,8 +63,8 @@ export default function NewProjectPage() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) throw new Error('Not authenticated')
 
-      // Convert comma-separated technologies to array
-      const technologiesArray = form.technologies
+      // Convert comma-separated technologies_used to array
+      const technologies_usedArray = form.technologies_used
         .split(',')
         .map(tech => tech.trim())
         .filter(tech => tech.length > 0)
@@ -76,7 +76,7 @@ export default function NewProjectPage() {
         goals: form.goals.trim() || null,
         target_audience: form.target_audience.trim() || null,
         content_angle: form.content_angle.trim() || null,
-        technologies: technologiesArray.length > 0 ? technologiesArray : null,
+        technologies_used: technologies_usedArray.length > 0 ? technologies_usedArray : null,
         target_completion: form.target_completion || null,
         status: 'active',
         progress_percentage: 0,
@@ -304,8 +304,8 @@ export default function NewProjectPage() {
                 </label>
                 <input
                   type="text"
-                  value={form.technologies}
-                  onChange={(e) => updateField('technologies', e.target.value)}
+                  value={form.technologies_used}
+                  onChange={(e) => updateField('technologies_used', e.target.value)}
                   placeholder="e.g., Next.js, Supabase, Tailwind"
                   className="w-full px-5 py-4 rounded-xl text-base transition-all duration-200 focus:ring-2 focus:ring-[var(--accent-teal)]"
                   style={{

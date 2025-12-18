@@ -28,7 +28,7 @@ interface ProjectData {
   goals: string
   target_audience: string
   content_angle: string
-  technologies: string
+  technologies_used: string
   target_completion: string
   status: 'active' | 'paused' | 'completed'
   progress_percentage: number
@@ -41,7 +41,7 @@ const defaultProject: ProjectData = {
   goals: '',
   target_audience: '',
   content_angle: '',
-  technologies: '',
+  technologies_used: '',
   target_completion: '',
   status: 'active',
   progress_percentage: 0,
@@ -78,8 +78,8 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
 
       if (error) throw error
 
-      // Convert technologies array to comma-separated string
-      const techArray = data.technologies as string[] | null
+      // Convert technologies_used array to comma-separated string
+      const techArray = data.technologies_used as string[] | null
       const techString = techArray ? techArray.join(', ') : ''
 
       setProject({
@@ -89,7 +89,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         goals: data.goals || '',
         target_audience: data.target_audience || '',
         content_angle: data.content_angle || '',
-        technologies: techString,
+        technologies_used: techString,
         target_completion: data.target_completion || '',
         status: data.status || 'active',
         progress_percentage: data.progress_percentage || 0,
@@ -111,8 +111,8 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     setMessage(null)
 
     try {
-      // Convert comma-separated technologies to array
-      const technologiesArray = project.technologies
+      // Convert comma-separated technologies_used to array
+      const technologies_usedArray = project.technologies_used
         .split(',')
         .map(tech => tech.trim())
         .filter(tech => tech.length > 0)
@@ -123,7 +123,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         goals: project.goals.trim() || null,
         target_audience: project.target_audience.trim() || null,
         content_angle: project.content_angle.trim() || null,
-        technologies: technologiesArray.length > 0 ? technologiesArray : null,
+        technologies_used: technologies_usedArray.length > 0 ? technologies_usedArray : null,
         target_completion: project.target_completion || null,
         status: project.status,
         progress_percentage: project.progress_percentage,
@@ -477,8 +477,8 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
               </label>
               <input
                 type="text"
-                value={project.technologies}
-                onChange={(e) => updateField('technologies', e.target.value)}
+                value={project.technologies_used}
+                onChange={(e) => updateField('technologies_used', e.target.value)}
                 placeholder="e.g., Next.js, Supabase, Tailwind"
                 className="w-full px-5 py-4 rounded-xl text-base transition-all duration-200 focus:ring-2 focus:ring-[var(--accent-teal)]"
                 style={{
