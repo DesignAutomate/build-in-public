@@ -17,6 +17,7 @@ import {
   Smile,
   Meh,
   Frown,
+  FileVideo,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 
@@ -81,6 +82,17 @@ export default function CheckInHistoryPage() {
   useEffect(() => {
     loadCheckIns()
   }, [])
+
+  // Helper to get proper image URL from Supabase storage
+  const getImageUrl = (fileUrl: string): string => {
+    // If it's already a full URL (contains http), use it directly
+    if (fileUrl.startsWith('http')) {
+      return fileUrl
+    }
+    // Otherwise, treat it as a storage path and get the public URL
+    const { data } = supabase.storage.from('uploads').getPublicUrl(fileUrl)
+    return data.publicUrl
+  }
 
   const loadCheckIns = async () => {
     try {
@@ -293,8 +305,9 @@ export default function CheckInHistoryPage() {
                         }}
                       />
 
-                      <div
-                        className="p-5 rounded-xl transition-all duration-200 hover:scale-[1.01]"
+                      <Link
+                        href={`/dashboard/check-in/${checkIn.id}`}
+                        className="block p-5 rounded-xl transition-all duration-200 hover:scale-[1.01] cursor-pointer"
                         style={{
                           background: 'var(--bg-card)',
                           border: '1px solid var(--border-subtle)',
@@ -407,13 +420,13 @@ export default function CheckInHistoryPage() {
                               >
                                 {upload.file_type.startsWith('image/') ? (
                                   <img
-                                    src={upload.file_url}
+                                    src={getImageUrl(upload.file_url)}
                                     alt=""
                                     className="w-full h-full object-cover"
                                   />
                                 ) : (
                                   <div className="w-full h-full flex items-center justify-center">
-                                    <ImageIcon className="w-6 h-6" style={{ color: 'var(--text-muted)' }} />
+                                    <FileVideo className="w-6 h-6" style={{ color: 'var(--text-muted)' }} />
                                   </div>
                                 )}
                                 {i === 3 && checkIn.uploads.length > 4 && (
@@ -428,7 +441,7 @@ export default function CheckInHistoryPage() {
                             ))}
                           </div>
                         )}
-                      </div>
+                      </Link>
                     </div>
                   )
                 })}

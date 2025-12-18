@@ -86,7 +86,8 @@ export default function FileUpload({ userId, files, onFilesChange }: FileUploadP
     try {
       // Check if clipboard API is available
       if (!navigator.clipboard || !navigator.clipboard.read) {
-        setPasteError('Clipboard access not supported in this browser')
+        setPasteError('Clipboard API not available. Copy an image, then press Ctrl+V (Cmd+V on Mac) to paste.')
+        setTimeout(() => setPasteError(null), 5000)
         return
       }
 
@@ -95,33 +96,43 @@ export default function FileUpload({ userId, files, onFilesChange }: FileUploadP
 
       for (const item of clipboardItems) {
         // Look for image types in the clipboard item
-        for (const type of item.types) {
-          if (type.startsWith('image/')) {
-            const blob = await item.getType(type)
-            const timestamp = Date.now()
-            const extension = type.split('/')[1] || 'png'
-            const file = new File([blob], `clipboard_${timestamp}.${extension}`, { type })
-            imageFiles.push(file)
-            break // Only take one image per clipboard item
-          }
+        const imageTypes = item.types.filter(type => type.startsWith('image/'))
+        if (imageTypes.length > 0) {
+          const blob = await item.getType(imageTypes[0])
+          const timestamp = Date.now()
+          const extension = imageTypes[0].split('/')[1] || 'png'
+          const file = new File([blob], `clipboard_${timestamp}.${extension}`, { type: imageTypes[0] })
+          imageFiles.push(file)
         }
       }
 
       if (imageFiles.length === 0) {
-        setPasteError('No images found in clipboard')
-        setTimeout(() => setPasteError(null), 3000)
+        setPasteError('No images in clipboard. Copy an image first, or drag and drop a file.')
+        setTimeout(() => setPasteError(null), 4000)
         return
       }
 
       await handleFilesUpload(imageFiles)
     } catch (error) {
       console.error('Clipboard paste error:', error)
-      if (error instanceof Error && error.name === 'NotAllowedError') {
-        setPasteError('Clipboard access denied. Try using Ctrl+V instead.')
+
+      // Provide specific error messages based on the error type
+      let errorMessage = 'Could not access clipboard. '
+
+      if (error instanceof Error) {
+        if (error.name === 'NotAllowedError') {
+          errorMessage += 'Permission denied. Try pressing Ctrl+V (Cmd+V on Mac) instead.'
+        } else if (error.name === 'NotFoundError') {
+          errorMessage += 'No image found. Copy an image first.'
+        } else {
+          errorMessage += 'Press Ctrl+V (Cmd+V on Mac) to paste, or drag and drop the image.'
+        }
       } else {
-        setPasteError('Failed to read clipboard. Try using Ctrl+V instead.')
+        errorMessage += 'Press Ctrl+V (Cmd+V on Mac) to paste, or drag and drop the image.'
       }
-      setTimeout(() => setPasteError(null), 3000)
+
+      setPasteError(errorMessage)
+      setTimeout(() => setPasteError(null), 5000)
     }
   }
 
