@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import {
   CalendarCheck,
   Sun,
@@ -70,9 +71,9 @@ const moodOptions: { value: Mood; label: string; icon: typeof Smile; color: stri
 ]
 
 export default function CheckInPage() {
+  const router = useRouter()
   const [userId, setUserId] = useState<string | null>(null)
   const [checkInType] = useState<CheckInType>(getCheckInType)
-  const [existingCheckInId, setExistingCheckInId] = useState<string | null>(null)
   const [projects, setProjects] = useState<Project[]>([])
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([])
   const [projectUpdates, setProjectUpdates] = useState<Record<string, ProjectUpdate>>({})
@@ -116,84 +117,8 @@ export default function CheckInPage() {
         setProjects(projectsData)
       }
 
-      // Check for existing check-in today
-      const todayStart = new Date()
-      todayStart.setHours(0, 0, 0, 0)
-
-      const { data: existingCheckIn } = await supabase
-        .from('check_ins')
-        .select('*')
-        .eq('user_id', user.id)
-        .eq('check_in_type', checkInType)
-        .gte('created_at', todayStart.toISOString())
-        .single()
-
-      if (existingCheckIn) {
-        setExistingCheckInId(existingCheckIn.id)
-        setGeneralNotes(existingCheckIn.general_notes || '')
-        setMood(existingCheckIn.mood)
-
-        // Load existing project updates
-        const { data: updates } = await supabase
-          .from('project_updates')
-          .select('*')
-          .eq('check_in_id', existingCheckIn.id)
-
-        if (updates && updates.length > 0) {
-          const selectedIds: string[] = []
-          const updatesMap: Record<string, ProjectUpdate> = {}
-
-          updates.forEach((update: {
-            project_id: string
-            update_text: string
-            is_win: boolean
-            is_blocker: boolean
-            blocker_description: string | null
-          }) => {
-            const project = projectsData?.find(p => p.id === update.project_id)
-            selectedIds.push(update.project_id)
-            updatesMap[update.project_id] = {
-              project_id: update.project_id,
-              project_name: project?.name || 'Unknown',
-              update_text: update.update_text || '',
-              is_win: update.is_win || false,
-              is_blocker: update.is_blocker || false,
-              blocker_description: update.blocker_description || '',
-            }
-          })
-
-          setSelectedProjectIds(selectedIds)
-          setProjectUpdates(updatesMap)
-        }
-
-        // Load existing uploads
-        const { data: uploads } = await supabase
-          .from('uploads')
-          .select('*')
-          .eq('check_in_id', existingCheckIn.id)
-
-        if (uploads) {
-          const filesWithPreviews = uploads.map((upload: {
-            id: string
-            file_name: string
-            file_url: string
-            file_type: string
-            file_size: number
-            user_context: string | null
-          }) => {
-            return {
-              id: upload.id,
-              file_name: upload.file_name,
-              file_url: upload.file_url,
-              file_type: upload.file_type,
-              file_size: upload.file_size,
-              user_context: upload.user_context || '',
-              preview_url: upload.file_type.startsWith('image/') ? upload.file_url : undefined,
-            }
-          })
-          setUploadedFiles(filesWithPreviews)
-        }
-      }
+      // Always start fresh - no loading of existing check-ins
+      // Users can create unlimited check-ins per day
     } catch (error) {
       console.error('Error loading data:', error)
     } finally {
@@ -251,59 +176,39 @@ export default function CheckInPage() {
     setMessage(null)
 
     try {
-      // Create or update check-in
-      let checkInId = existingCheckInId
+      // STEP 1: Create check-in record
+      console.log('=== STEP 1: Creating check_in ===')
+      const insertPayload = {
+        user_id: userId,
+        check_in_type: checkInType,
+        check_in_date: todayISO,
+        general_notes: generalNotes || null,
+        mood,
+      }
+      console.log('Payload:', JSON.stringify(insertPayload, null, 2))
 
-      if (existingCheckInId) {
-        // Update existing
-        const updatePayload = {
-          general_notes: generalNotes || null,
-          mood,
-        }
-        console.log('Updating check_in with payload:', JSON.stringify(updatePayload, null, 2))
+      const { data: checkInData, error: checkInError } = await supabase
+        .from('check_ins')
+        .insert(insertPayload)
+        .select()
+        .single()
 
-        const { error } = await supabase
-          .from('check_ins')
-          .update(updatePayload)
-          .eq('id', existingCheckInId)
-
-        if (error) {
-          console.error('check_ins update error:', JSON.stringify(error, null, 2))
-          throw error
-        }
-      } else {
-        // Create new
-        const insertPayload = {
-          user_id: userId,
-          check_in_type: checkInType,
-          check_in_date: todayISO,
-          general_notes: generalNotes || null,
-          mood,
-        }
-        console.log('Inserting check_in with payload:', JSON.stringify(insertPayload, null, 2))
-
-        const { data, error } = await supabase
-          .from('check_ins')
-          .insert(insertPayload)
-          .select()
-          .single()
-
-        if (error) {
-          console.error('check_ins insert error:', JSON.stringify(error, null, 2))
-          throw error
-        }
-        checkInId = data.id
-        setExistingCheckInId(data.id)
+      if (checkInError) {
+        console.error('=== CHECK_INS INSERT FAILED ===')
+        console.error('Error code:', checkInError.code)
+        console.error('Error message:', checkInError.message)
+        console.error('Error details:', checkInError.details)
+        console.error('Error hint:', checkInError.hint)
+        console.error('Full error:', JSON.stringify(checkInError, null, 2))
+        throw new Error(`Check-in failed: ${checkInError.message} (${checkInError.code})`)
       }
 
-      // Delete existing project updates and recreate
-      if (checkInId) {
-        await supabase
-          .from('project_updates')
-          .delete()
-          .eq('check_in_id', checkInId)
+      const checkInId = checkInData.id
+      console.log('=== CHECK_IN SUCCESS, ID:', checkInId, '===')
 
-        // Create project updates
+      // STEP 2: Create project updates
+      if (Object.keys(projectUpdates).length > 0) {
+        console.log('=== STEP 2: Creating project_updates ===')
         const projectUpdateRecords = Object.values(projectUpdates).map(update => ({
           check_in_id: checkInId,
           project_id: update.project_id,
@@ -312,24 +217,29 @@ export default function CheckInPage() {
           is_blocker: update.is_blocker,
           blocker_description: update.is_blocker ? update.blocker_description : null,
         }))
+        console.log('Payload:', JSON.stringify(projectUpdateRecords, null, 2))
 
-        if (projectUpdateRecords.length > 0) {
-          console.log('Inserting project_updates with payload:', JSON.stringify(projectUpdateRecords, null, 2))
+        const { error: updateError } = await supabase
+          .from('project_updates')
+          .insert(projectUpdateRecords)
 
-          const { error: updateError } = await supabase
-            .from('project_updates')
-            .insert(projectUpdateRecords)
-
-          if (updateError) {
-            console.error('project_updates insert error:', JSON.stringify(updateError, null, 2))
-            throw updateError
-          }
+        if (updateError) {
+          console.error('=== PROJECT_UPDATES INSERT FAILED ===')
+          console.error('Error code:', updateError.code)
+          console.error('Error message:', updateError.message)
+          console.error('Error details:', updateError.details)
+          console.error('Error hint:', updateError.hint)
+          console.error('Full error:', JSON.stringify(updateError, null, 2))
+          throw new Error(`Project updates failed: ${updateError.message} (${updateError.code})`)
         }
+        console.log('=== PROJECT_UPDATES SUCCESS ===')
+      }
 
-        // Update upload records with check_in_id
+      // STEP 3: Create upload records
+      if (uploadedFiles.length > 0) {
+        console.log('=== STEP 3: Creating uploads ===')
         for (const file of uploadedFiles) {
           if (file.id.startsWith('temp_')) {
-            // New upload - create record
             const uploadPayload = {
               user_id: userId,
               check_in_id: checkInId,
@@ -339,40 +249,36 @@ export default function CheckInPage() {
               file_size: file.file_size,
               user_context: file.user_context || null,
             }
-            console.log('Inserting upload with payload:', JSON.stringify(uploadPayload, null, 2))
+            console.log('Upload payload:', JSON.stringify(uploadPayload, null, 2))
 
-            const { data: uploadData, error: uploadError } = await supabase
+            const { error: uploadError } = await supabase
               .from('uploads')
               .insert(uploadPayload)
-              .select()
-              .single()
 
             if (uploadError) {
-              console.error('uploads insert error:', JSON.stringify(uploadError, null, 2))
-              throw uploadError
+              console.error('=== UPLOADS INSERT FAILED ===')
+              console.error('Error code:', uploadError.code)
+              console.error('Error message:', uploadError.message)
+              console.error('Error details:', uploadError.details)
+              console.error('Error hint:', uploadError.hint)
+              console.error('Full error:', JSON.stringify(uploadError, null, 2))
+              throw new Error(`Upload record failed: ${uploadError.message} (${uploadError.code})`)
             }
-
-            // Update local file ID
-            if (uploadData) {
-              file.id = uploadData.id
-            }
-          } else {
-            // Existing upload - update user_context
-            await supabase
-              .from('uploads')
-              .update({ user_context: file.user_context || null })
-              .eq('id', file.id)
           }
         }
+        console.log('=== UPLOADS SUCCESS ===')
       }
 
-      setMessage({ type: 'success', text: 'Check-in saved successfully!' })
-      setTimeout(() => setMessage(null), 4000)
+      // Success - show message and redirect
+      setMessage({ type: 'success', text: 'Check-in saved! Redirecting...' })
+      setTimeout(() => {
+        router.push('/dashboard/check-in/history')
+      }, 1000)
     } catch (error) {
-      console.error('Error saving check-in:', error)
-      console.error('Full error details:', JSON.stringify(error, null, 2))
+      console.error('=== SAVE FAILED ===')
+      console.error('Error:', error)
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
-      setMessage({ type: 'error', text: `Failed to save: ${errorMessage}` })
+      setMessage({ type: 'error', text: errorMessage })
     } finally {
       setSaving(false)
     }
@@ -425,11 +331,6 @@ export default function CheckInPage() {
         <p style={{ color: 'var(--text-secondary)' }}>
           {config.greeting}
         </p>
-        {existingCheckInId && (
-          <p className="mt-2 text-sm" style={{ color: 'var(--accent-teal)' }}>
-            Editing existing check-in
-          </p>
-        )}
       </header>
 
       {/* Messages */}

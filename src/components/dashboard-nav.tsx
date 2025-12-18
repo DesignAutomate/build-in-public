@@ -10,13 +10,14 @@ import {
   Settings,
   LogOut,
   Sparkles,
+  Plus,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 
 const navItems = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/dashboard/projects', label: 'Projects', icon: FolderKanban },
-  { href: '/dashboard/check-in', label: 'Check-in', icon: CalendarCheck },
+  { href: '/dashboard/check-in/history', label: 'Check-ins', icon: CalendarCheck },
   { href: '/dashboard/content', label: 'Content', icon: FileText },
   { href: '/dashboard/settings', label: 'Settings', icon: Settings },
 ]
@@ -70,6 +71,20 @@ export default function DashboardNav({ userEmail }: DashboardNavProps) {
 
       {/* Navigation Links */}
       <div className="flex-1 px-3">
+        {/* New Check-in button */}
+        <Link
+          href="/dashboard/check-in"
+          className="flex items-center justify-center gap-2 w-full px-4 py-3 mb-4 rounded-xl text-sm font-semibold transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
+          style={{
+            background: 'linear-gradient(135deg, var(--accent-coral), var(--accent-coral-hover))',
+            color: 'white',
+            boxShadow: '0 4px 15px rgba(255, 107, 107, 0.25)',
+          }}
+        >
+          <Plus className="w-4 h-4" />
+          New Check-in
+        </Link>
+
         <div className="space-y-1">
           {navItems.map((item) => {
             const Icon = item.icon

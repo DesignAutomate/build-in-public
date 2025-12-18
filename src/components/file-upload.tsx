@@ -36,11 +36,15 @@ export default function FileUpload({ userId, files, onFilesChange }: FileUploadP
   const [isDragging, setIsDragging] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({})
+  const [pasteError, setPasteError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const supabase = createClient()
 
-  // Handle clipboard paste
+  // Store handleFilesUpload in a ref so paste handler can access it
+  const handleFilesUploadRef = useRef<(files: File[]) => Promise<void>>()
+
+  // Handle clipboard paste via Ctrl+V
   useEffect(() => {
     const handlePaste = async (e: ClipboardEvent) => {
       const items = e.clipboardData?.items
@@ -53,7 +57,6 @@ export default function FileUpload({ userId, files, onFilesChange }: FileUploadP
         if (item.type.startsWith('image/')) {
           const file = item.getAsFile()
           if (file) {
-            // Create a new file with a proper name
             const timestamp = Date.now()
             const extension = file.type.split('/')[1] || 'png'
             const namedFile = new File([file], `clipboard_${timestamp}.${extension}`, {
@@ -66,13 +69,61 @@ export default function FileUpload({ userId, files, onFilesChange }: FileUploadP
 
       if (imageFiles.length > 0) {
         e.preventDefault()
-        await handleFilesUpload(imageFiles)
+        if (handleFilesUploadRef.current) {
+          await handleFilesUploadRef.current(imageFiles)
+        }
       }
     }
 
-    document.addEventListener('paste', handlePaste)
-    return () => document.removeEventListener('paste', handlePaste)
-  }, [files, onFilesChange, userId])
+    window.addEventListener('paste', handlePaste)
+    return () => window.removeEventListener('paste', handlePaste)
+  }, [])
+
+  // Handle click to paste from clipboard using Clipboard API
+  const handlePasteFromClipboard = async () => {
+    setPasteError(null)
+
+    try {
+      // Check if clipboard API is available
+      if (!navigator.clipboard || !navigator.clipboard.read) {
+        setPasteError('Clipboard access not supported in this browser')
+        return
+      }
+
+      const clipboardItems = await navigator.clipboard.read()
+      const imageFiles: File[] = []
+
+      for (const item of clipboardItems) {
+        // Look for image types in the clipboard item
+        for (const type of item.types) {
+          if (type.startsWith('image/')) {
+            const blob = await item.getType(type)
+            const timestamp = Date.now()
+            const extension = type.split('/')[1] || 'png'
+            const file = new File([blob], `clipboard_${timestamp}.${extension}`, { type })
+            imageFiles.push(file)
+            break // Only take one image per clipboard item
+          }
+        }
+      }
+
+      if (imageFiles.length === 0) {
+        setPasteError('No images found in clipboard')
+        setTimeout(() => setPasteError(null), 3000)
+        return
+      }
+
+      await handleFilesUpload(imageFiles)
+    } catch (error) {
+      console.error('Clipboard paste error:', error)
+      if (error instanceof Error && error.name === 'NotAllowedError') {
+        setPasteError('Clipboard access denied. Try using Ctrl+V instead.')
+      } else {
+        setPasteError('Failed to read clipboard. Try using Ctrl+V instead.')
+      }
+      setTimeout(() => setPasteError(null), 3000)
+    }
+  }
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -157,6 +208,9 @@ export default function FileUpload({ userId, files, onFilesChange }: FileUploadP
     setUploading(false)
     setUploadProgress({})
   }
+
+  // Keep ref updated for paste handler
+  handleFilesUploadRef.current = handleFilesUpload
 
   const handleFiles = async (fileList: FileList) => {
     await handleFilesUpload(Array.from(fileList))
@@ -250,16 +304,30 @@ export default function FileUpload({ userId, files, onFilesChange }: FileUploadP
               <p className="text-sm font-medium mb-1" style={{ color: 'var(--text-primary)' }}>
                 Drop files here or click to browse
               </p>
-              <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>
+              <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>
                 Images (PNG, JPG, GIF) and videos (MP4, WebM) up to 50MB
               </p>
-              <div
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs"
-                style={{ background: 'var(--bg-card)', color: 'var(--text-muted)' }}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  handlePasteFromClipboard()
+                }}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium transition-all duration-200 hover:scale-105"
+                style={{
+                  background: 'var(--bg-card)',
+                  border: '1px solid var(--border-default)',
+                  color: 'var(--text-secondary)',
+                }}
               >
-                <Clipboard className="w-3.5 h-3.5" />
-                <span>or paste from clipboard (Ctrl+V)</span>
-              </div>
+                <Clipboard className="w-4 h-4" />
+                <span>or click to paste from clipboard</span>
+              </button>
+              {pasteError && (
+                <p className="text-xs mt-2" style={{ color: 'var(--accent-coral)' }}>
+                  {pasteError}
+                </p>
+              )}
             </>
           )}
         </div>
