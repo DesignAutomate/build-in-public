@@ -1,22 +1,23 @@
 'use client'
 
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import {
   Upload,
   X,
   FileVideo,
   Loader2,
   Image as ImageIcon,
+  Clipboard,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 
 export interface UploadedFile {
   id: string
   file_name: string
-  file_path: string
+  file_url: string
   file_type: string
   file_size: number
-  context_note: string
+  user_context: string
   preview_url?: string
 }
 
@@ -36,7 +37,42 @@ export default function FileUpload({ userId, files, onFilesChange }: FileUploadP
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({})
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
   const supabase = createClient()
+
+  // Handle clipboard paste
+  useEffect(() => {
+    const handlePaste = async (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items
+      if (!items) return
+
+      const imageFiles: File[] = []
+
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i]
+        if (item.type.startsWith('image/')) {
+          const file = item.getAsFile()
+          if (file) {
+            // Create a new file with a proper name
+            const timestamp = Date.now()
+            const extension = file.type.split('/')[1] || 'png'
+            const namedFile = new File([file], `clipboard_${timestamp}.${extension}`, {
+              type: file.type,
+            })
+            imageFiles.push(namedFile)
+          }
+        }
+      }
+
+      if (imageFiles.length > 0) {
+        e.preventDefault()
+        await handleFilesUpload(imageFiles)
+      }
+    }
+
+    document.addEventListener('paste', handlePaste)
+    return () => document.removeEventListener('paste', handlePaste)
+  }, [files, onFilesChange, userId])
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -83,10 +119,10 @@ export default function FileUpload({ userId, files, onFilesChange }: FileUploadP
       return {
         id: `temp_${timestamp}_${Math.random().toString(36).slice(2)}`,
         file_name: file.name,
-        file_path: filePath,
+        file_url: urlData.publicUrl,
         file_type: file.type,
         file_size: file.size,
-        context_note: '',
+        user_context: '',
         preview_url: isImage ? urlData.publicUrl : undefined,
       }
     } catch (error) {
@@ -95,8 +131,8 @@ export default function FileUpload({ userId, files, onFilesChange }: FileUploadP
     }
   }
 
-  const handleFiles = async (fileList: FileList) => {
-    const validFiles = Array.from(fileList).filter(
+  const handleFilesUpload = async (fileList: File[]) => {
+    const validFiles = fileList.filter(
       file => ACCEPTED_TYPES.includes(file.type) && file.size <= MAX_FILE_SIZE
     )
 
@@ -122,6 +158,10 @@ export default function FileUpload({ userId, files, onFilesChange }: FileUploadP
     setUploadProgress({})
   }
 
+  const handleFiles = async (fileList: FileList) => {
+    await handleFilesUpload(Array.from(fileList))
+  }
+
   const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault()
     setIsDragging(false)
@@ -138,11 +178,16 @@ export default function FileUpload({ userId, files, onFilesChange }: FileUploadP
   }
 
   const removeFile = async (fileToRemove: UploadedFile) => {
-    // Delete from storage
+    // Extract file path from URL for deletion
     try {
-      await supabase.storage
-        .from('uploads')
-        .remove([fileToRemove.file_path])
+      const url = new URL(fileToRemove.file_url)
+      const pathParts = url.pathname.split('/uploads/')
+      if (pathParts.length > 1) {
+        const filePath = decodeURIComponent(pathParts[1])
+        await supabase.storage
+          .from('uploads')
+          .remove([filePath])
+      }
     } catch (error) {
       console.error('Error deleting file:', error)
     }
@@ -152,14 +197,14 @@ export default function FileUpload({ userId, files, onFilesChange }: FileUploadP
 
   const updateFileNote = (fileId: string, note: string) => {
     onFilesChange(
-      files.map(f => f.id === fileId ? { ...f, context_note: note } : f)
+      files.map(f => f.id === fileId ? { ...f, user_context: note } : f)
     )
   }
 
   const isImage = (fileType: string) => ACCEPTED_IMAGE_TYPES.includes(fileType)
 
   return (
-    <div className="space-y-4">
+    <div ref={containerRef} className="space-y-4">
       {/* Drop zone */}
       <div
         onClick={() => fileInputRef.current?.click()}
@@ -205,9 +250,16 @@ export default function FileUpload({ userId, files, onFilesChange }: FileUploadP
               <p className="text-sm font-medium mb-1" style={{ color: 'var(--text-primary)' }}>
                 Drop files here or click to browse
               </p>
-              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>
                 Images (PNG, JPG, GIF) and videos (MP4, WebM) up to 50MB
               </p>
+              <div
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs"
+                style={{ background: 'var(--bg-card)', color: 'var(--text-muted)' }}
+              >
+                <Clipboard className="w-3.5 h-3.5" />
+                <span>or paste from clipboard (Ctrl+V)</span>
+              </div>
             </>
           )}
         </div>
@@ -288,7 +340,7 @@ export default function FileUpload({ userId, files, onFilesChange }: FileUploadP
               <div className="p-3">
                 <input
                   type="text"
-                  value={file.context_note}
+                  value={file.user_context}
                   onChange={(e) => updateFileNote(file.id, e.target.value)}
                   placeholder="Add context note (optional)"
                   className="w-full px-3 py-2 rounded-lg text-sm transition-all duration-200"

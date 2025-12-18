@@ -30,7 +30,7 @@ interface ProjectUpdate {
   project_name: string
   update_text: string
   is_win: boolean
-  has_blocker: boolean
+  is_blocker: boolean
   blocker_description: string
 }
 
@@ -93,6 +93,8 @@ export default function CheckInPage() {
     day: 'numeric',
   })
 
+  const todayISO = new Date().toISOString().split('T')[0] // YYYY-MM-DD format
+
   useEffect(() => {
     loadData()
   }, [])
@@ -145,7 +147,7 @@ export default function CheckInPage() {
             project_id: string
             update_text: string
             is_win: boolean
-            has_blocker: boolean
+            is_blocker: boolean
             blocker_description: string | null
           }) => {
             const project = projectsData?.find(p => p.id === update.project_id)
@@ -155,7 +157,7 @@ export default function CheckInPage() {
               project_name: project?.name || 'Unknown',
               update_text: update.update_text || '',
               is_win: update.is_win || false,
-              has_blocker: update.has_blocker || false,
+              is_blocker: update.is_blocker || false,
               blocker_description: update.blocker_description || '',
             }
           })
@@ -174,23 +176,19 @@ export default function CheckInPage() {
           const filesWithPreviews = uploads.map((upload: {
             id: string
             file_name: string
-            file_path: string
+            file_url: string
             file_type: string
             file_size: number
-            context_note: string | null
+            user_context: string | null
           }) => {
-            const { data: urlData } = supabase.storage
-              .from('uploads')
-              .getPublicUrl(upload.file_path)
-
             return {
               id: upload.id,
               file_name: upload.file_name,
-              file_path: upload.file_path,
+              file_url: upload.file_url,
               file_type: upload.file_type,
               file_size: upload.file_size,
-              context_note: upload.context_note || '',
-              preview_url: upload.file_type.startsWith('image/') ? urlData.publicUrl : undefined,
+              user_context: upload.user_context || '',
+              preview_url: upload.file_type.startsWith('image/') ? upload.file_url : undefined,
             }
           })
           setUploadedFiles(filesWithPreviews)
@@ -216,7 +214,7 @@ export default function CheckInPage() {
           project_name: project?.name || 'Unknown',
           update_text: '',
           is_win: false,
-          has_blocker: false,
+          is_blocker: false,
           blocker_description: '',
         }
       }
@@ -258,30 +256,42 @@ export default function CheckInPage() {
 
       if (existingCheckInId) {
         // Update existing
+        const updatePayload = {
+          general_notes: generalNotes || null,
+          mood,
+        }
+        console.log('Updating check_in with payload:', JSON.stringify(updatePayload, null, 2))
+
         const { error } = await supabase
           .from('check_ins')
-          .update({
-            general_notes: generalNotes || null,
-            mood,
-            updated_at: new Date().toISOString(),
-          })
+          .update(updatePayload)
           .eq('id', existingCheckInId)
 
-        if (error) throw error
+        if (error) {
+          console.error('check_ins update error:', JSON.stringify(error, null, 2))
+          throw error
+        }
       } else {
         // Create new
+        const insertPayload = {
+          user_id: userId,
+          check_in_type: checkInType,
+          check_in_date: todayISO,
+          general_notes: generalNotes || null,
+          mood,
+        }
+        console.log('Inserting check_in with payload:', JSON.stringify(insertPayload, null, 2))
+
         const { data, error } = await supabase
           .from('check_ins')
-          .insert({
-            user_id: userId,
-            check_in_type: checkInType,
-            general_notes: generalNotes || null,
-            mood,
-          })
+          .insert(insertPayload)
           .select()
           .single()
 
-        if (error) throw error
+        if (error) {
+          console.error('check_ins insert error:', JSON.stringify(error, null, 2))
+          throw error
+        }
         checkInId = data.id
         setExistingCheckInId(data.id)
       }
@@ -299,47 +309,58 @@ export default function CheckInPage() {
           project_id: update.project_id,
           update_text: update.update_text || null,
           is_win: update.is_win,
-          has_blocker: update.has_blocker,
-          blocker_description: update.has_blocker ? update.blocker_description : null,
+          is_blocker: update.is_blocker,
+          blocker_description: update.is_blocker ? update.blocker_description : null,
         }))
 
         if (projectUpdateRecords.length > 0) {
+          console.log('Inserting project_updates with payload:', JSON.stringify(projectUpdateRecords, null, 2))
+
           const { error: updateError } = await supabase
             .from('project_updates')
             .insert(projectUpdateRecords)
 
-          if (updateError) throw updateError
+          if (updateError) {
+            console.error('project_updates insert error:', JSON.stringify(updateError, null, 2))
+            throw updateError
+          }
         }
 
         // Update upload records with check_in_id
         for (const file of uploadedFiles) {
           if (file.id.startsWith('temp_')) {
             // New upload - create record
+            const uploadPayload = {
+              user_id: userId,
+              check_in_id: checkInId,
+              file_name: file.file_name,
+              file_url: file.file_url,
+              file_type: file.file_type,
+              file_size: file.file_size,
+              user_context: file.user_context || null,
+            }
+            console.log('Inserting upload with payload:', JSON.stringify(uploadPayload, null, 2))
+
             const { data: uploadData, error: uploadError } = await supabase
               .from('uploads')
-              .insert({
-                user_id: userId,
-                check_in_id: checkInId,
-                file_name: file.file_name,
-                file_path: file.file_path,
-                file_type: file.file_type,
-                file_size: file.file_size,
-                context_note: file.context_note || null,
-              })
+              .insert(uploadPayload)
               .select()
               .single()
 
-            if (uploadError) throw uploadError
+            if (uploadError) {
+              console.error('uploads insert error:', JSON.stringify(uploadError, null, 2))
+              throw uploadError
+            }
 
             // Update local file ID
             if (uploadData) {
               file.id = uploadData.id
             }
           } else {
-            // Existing upload - update context note
+            // Existing upload - update user_context
             await supabase
               .from('uploads')
-              .update({ context_note: file.context_note || null })
+              .update({ user_context: file.user_context || null })
               .eq('id', file.id)
           }
         }
@@ -349,6 +370,7 @@ export default function CheckInPage() {
       setTimeout(() => setMessage(null), 4000)
     } catch (error) {
       console.error('Error saving check-in:', error)
+      console.error('Full error details:', JSON.stringify(error, null, 2))
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       setMessage({ type: 'error', text: `Failed to save: ${errorMessage}` })
     } finally {
@@ -520,15 +542,15 @@ export default function CheckInPage() {
                       {/* Blocker toggle */}
                       <button
                         type="button"
-                        onClick={() => updateProjectUpdate(projectId, 'has_blocker', !update.has_blocker)}
+                        onClick={() => updateProjectUpdate(projectId, 'is_blocker', !update.is_blocker)}
                         className={`
                           flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium
                           transition-all duration-200
                         `}
                         style={{
-                          background: update.has_blocker ? 'rgba(255, 107, 107, 0.15)' : 'var(--bg-card)',
-                          border: `1px solid ${update.has_blocker ? 'var(--accent-coral)' : 'var(--border-default)'}`,
-                          color: update.has_blocker ? 'var(--accent-coral)' : 'var(--text-secondary)',
+                          background: update.is_blocker ? 'rgba(255, 107, 107, 0.15)' : 'var(--bg-card)',
+                          border: `1px solid ${update.is_blocker ? 'var(--accent-coral)' : 'var(--border-default)'}`,
+                          color: update.is_blocker ? 'var(--accent-coral)' : 'var(--text-secondary)',
                         }}
                       >
                         <AlertTriangle className="w-4 h-4" />
@@ -537,7 +559,7 @@ export default function CheckInPage() {
                     </div>
 
                     {/* Blocker description */}
-                    {update.has_blocker && (
+                    {update.is_blocker && (
                       <input
                         type="text"
                         value={update.blocker_description}
