@@ -24,11 +24,12 @@ import {
   X,
   FileVideo,
   ImageOff,
+  Plus,
+  Image as ImageIcon,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import FileUpload, { UploadedFile } from '@/components/file-upload'
 
-// Supabase project URL for constructing storage URLs
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://soalrvabjfhujvaxlbcm.supabase.co'
 
 type CheckInType = 'morning' | 'midday' | 'evening'
 type Mood = 'great' | 'good' | 'okay' | 'struggling' | null
@@ -53,6 +54,7 @@ interface Upload {
   file_type: string
   file_size: number
   user_context: string | null
+  signed_url?: string  // Populated with signed URL for display
 }
 
 interface CheckIn {
@@ -108,6 +110,8 @@ export default function CheckInDetailPage() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [selectedImage, setSelectedImage] = useState<Upload | null>(null)
   const [failedImages, setFailedImages] = useState<Set<string>>(new Set())
+  const [newUploads, setNewUploads] = useState<UploadedFile[]>([])
+  const [deletingUpload, setDeletingUpload] = useState<string | null>(null)
 
   const supabase = createClient()
 
@@ -115,25 +119,74 @@ export default function CheckInDetailPage() {
     loadCheckIn()
   }, [checkInId])
 
-  // Helper to get proper image URL from Supabase storage
-  const getImageUrl = (fileUrl: string): string => {
-    console.log('=== getImageUrl DEBUG (detail page) ===')
-    console.log('Input fileUrl:', fileUrl)
-
+  // Extract storage path from a file_url (handles both paths and full URLs)
+  const getStoragePath = (fileUrl: string): string => {
     if (fileUrl.startsWith('http')) {
-      console.log('Already full URL, returning as-is')
-      return fileUrl
+      // Extract path from full URL
+      const match = fileUrl.match(/\/uploads\/(.+)$/)
+      if (match) {
+        return decodeURIComponent(match[1])
+      }
     }
+    return fileUrl
+  }
 
-    // Construct the full public URL
-    const fullUrl = `${SUPABASE_URL}/storage/v1/object/public/uploads/${fileUrl}`
-    console.log('Constructed URL:', fullUrl)
-    return fullUrl
+  // Generate signed URL for an upload
+  const getSignedUrl = async (fileUrl: string): Promise<string | null> => {
+    try {
+      const storagePath = getStoragePath(fileUrl)
+      const { data, error } = await supabase.storage
+        .from('uploads')
+        .createSignedUrl(storagePath, 3600) // 1 hour expiry
+
+      if (error) {
+        console.error('Signed URL error:', error)
+        return null
+      }
+      return data.signedUrl
+    } catch (error) {
+      console.error('Error getting signed URL:', error)
+      return null
+    }
   }
 
   const handleImageError = (uploadId: string) => {
     console.log('Image failed to load:', uploadId)
     setFailedImages(prev => new Set(prev).add(uploadId))
+  }
+
+  // Delete a single upload from the check-in
+  const deleteUpload = async (upload: Upload) => {
+    if (!checkIn) return
+
+    setDeletingUpload(upload.id)
+    try {
+      // Delete from storage
+      const storagePath = getStoragePath(upload.file_url)
+      await supabase.storage.from('uploads').remove([storagePath])
+
+      // Delete from database
+      const { error } = await supabase
+        .from('uploads')
+        .delete()
+        .eq('id', upload.id)
+
+      if (error) throw error
+
+      // Update local state
+      setCheckIn({
+        ...checkIn,
+        uploads: checkIn.uploads.filter(u => u.id !== upload.id)
+      })
+
+      setMessage({ type: 'success', text: 'File deleted' })
+      setTimeout(() => setMessage(null), 3000)
+    } catch (error) {
+      console.error('Error deleting upload:', error)
+      setMessage({ type: 'error', text: 'Failed to delete file' })
+    } finally {
+      setDeletingUpload(null)
+    }
   }
 
   const loadCheckIn = async () => {
@@ -182,7 +235,20 @@ export default function CheckInDetailPage() {
         return
       }
 
-      setCheckIn(data as CheckIn)
+      // Generate signed URLs for all uploads
+      const uploadsWithSignedUrls = await Promise.all(
+        (data.uploads || []).map(async (upload: Upload) => {
+          const signedUrl = await getSignedUrl(upload.file_url)
+          return { ...upload, signed_url: signedUrl || undefined }
+        })
+      )
+
+      const checkInWithSignedUrls = {
+        ...data,
+        uploads: uploadsWithSignedUrls,
+      } as CheckIn
+
+      setCheckIn(checkInWithSignedUrls)
       setGeneralNotes(data.general_notes || '')
       setMood(data.mood)
       setProjectUpdates(data.project_updates as ProjectUpdate[])
@@ -224,6 +290,44 @@ export default function CheckInDetailPage() {
           .eq('id', update.id)
 
         if (updateError) throw updateError
+      }
+
+      // Save new uploads to database
+      if (newUploads.length > 0) {
+        const uploadRecords = newUploads.map(file => ({
+          check_in_id: checkIn.id,
+          user_id: checkIn.user_id,
+          file_name: file.file_name,
+          file_url: file.file_url,
+          file_type: file.file_type,
+          file_size: file.file_size,
+          user_context: file.user_context || null,
+        }))
+
+        const { data: savedUploads, error: uploadsError } = await supabase
+          .from('uploads')
+          .insert(uploadRecords)
+          .select()
+
+        if (uploadsError) throw uploadsError
+
+        // Add signed URLs to the newly saved uploads and update local state
+        if (savedUploads) {
+          const newUploadsWithUrls = await Promise.all(
+            savedUploads.map(async (upload: Upload) => {
+              const signedUrl = await getSignedUrl(upload.file_url)
+              return { ...upload, signed_url: signedUrl || undefined }
+            })
+          )
+
+          setCheckIn({
+            ...checkIn,
+            uploads: [...checkIn.uploads, ...newUploadsWithUrls]
+          })
+        }
+
+        // Clear new uploads
+        setNewUploads([])
       }
 
       setMessage({ type: 'success', text: 'Changes saved!' })
@@ -515,38 +619,41 @@ export default function CheckInDetailPage() {
       )}
 
       {/* Uploads Gallery */}
-      {checkIn.uploads.length > 0 && (
-        <section
-          className="p-6 rounded-2xl animate-fade-in-up"
-          style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}
-        >
-          <div className="flex items-center gap-3 mb-5">
-            <div
-              className="w-10 h-10 rounded-xl flex items-center justify-center"
-              style={{ background: 'rgba(45, 212, 191, 0.15)' }}
-            >
-              <FileText className="w-5 h-5" style={{ color: 'var(--accent-teal)' }} />
-            </div>
-            <h2
-              className="text-lg font-semibold"
-              style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}
-            >
-              Screenshots & Recordings
-            </h2>
+      <section
+        className="p-6 rounded-2xl animate-fade-in-up"
+        style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}
+      >
+        <div className="flex items-center gap-3 mb-5">
+          <div
+            className="w-10 h-10 rounded-xl flex items-center justify-center"
+            style={{ background: 'rgba(45, 212, 191, 0.15)' }}
+          >
+            <ImageIcon className="w-5 h-5" style={{ color: 'var(--accent-teal)' }} />
           </div>
+          <h2
+            className="text-lg font-semibold"
+            style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}
+          >
+            Screenshots & Recordings
+          </h2>
+        </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+        {/* Existing uploads */}
+        {checkIn.uploads.length > 0 && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-6">
             {checkIn.uploads.map((upload) => (
               <div
                 key={upload.id}
-                className="relative rounded-xl overflow-hidden cursor-pointer group"
+                className="relative rounded-xl overflow-hidden group"
                 style={{ background: 'var(--bg-elevated)' }}
-                onClick={() => upload.file_type.startsWith('image/') && !failedImages.has(upload.id) && setSelectedImage(upload)}
               >
-                <div className="aspect-square">
-                  {upload.file_type.startsWith('image/') && !failedImages.has(upload.id) ? (
+                <div
+                  className="aspect-square cursor-pointer"
+                  onClick={() => upload.file_type.startsWith('image/') && upload.signed_url && !failedImages.has(upload.id) && setSelectedImage(upload)}
+                >
+                  {upload.file_type.startsWith('image/') && upload.signed_url && !failedImages.has(upload.id) ? (
                     <img
-                      src={getImageUrl(upload.file_url)}
+                      src={upload.signed_url}
                       alt={upload.file_name}
                       className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
                       onError={() => handleImageError(upload.id)}
@@ -562,6 +669,25 @@ export default function CheckInDetailPage() {
                     </div>
                   )}
                 </div>
+
+                {/* Delete button */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    deleteUpload(upload)
+                  }}
+                  disabled={deletingUpload === upload.id}
+                  className="absolute top-2 right-2 p-2 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 disabled:opacity-50"
+                  style={{ background: 'rgba(0, 0, 0, 0.7)' }}
+                >
+                  {deletingUpload === upload.id ? (
+                    <Loader2 className="w-4 h-4 text-white animate-spin" />
+                  ) : (
+                    <Trash2 className="w-4 h-4 text-white" />
+                  )}
+                </button>
+
                 {upload.user_context && (
                   <div
                     className="absolute bottom-0 left-0 right-0 px-3 py-2 text-xs truncate"
@@ -573,8 +699,25 @@ export default function CheckInDetailPage() {
               </div>
             ))}
           </div>
-        </section>
-      )}
+        )}
+
+        {/* Add new uploads */}
+        <div>
+          <p className="text-sm mb-3" style={{ color: 'var(--text-secondary)' }}>
+            {checkIn.uploads.length > 0 ? 'Add more files:' : 'No files uploaded yet. Add some:'}
+          </p>
+          <FileUpload
+            userId={checkIn.user_id}
+            files={newUploads}
+            onFilesChange={setNewUploads}
+          />
+          {newUploads.length > 0 && (
+            <p className="text-sm mt-3" style={{ color: 'var(--accent-teal)' }}>
+              {newUploads.length} new file{newUploads.length !== 1 ? 's' : ''} ready to save
+            </p>
+          )}
+        </div>
+      </section>
 
       {/* General Notes */}
       <section
@@ -744,7 +887,7 @@ export default function CheckInDetailPage() {
             <X className="w-6 h-6 text-white" />
           </button>
           <img
-            src={getImageUrl(selectedImage.file_url)}
+            src={selectedImage.signed_url || ''}
             alt={selectedImage.file_name}
             className="max-w-full max-h-[90vh] object-contain rounded-lg"
             onClick={(e) => e.stopPropagation()}

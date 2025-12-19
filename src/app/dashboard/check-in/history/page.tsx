@@ -22,9 +22,6 @@ import {
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 
-// Supabase project URL for constructing storage URLs
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://soalrvabjfhujvaxlbcm.supabase.co'
-
 interface CheckIn {
   id: string
   check_in_type: 'morning' | 'midday' | 'evening'
@@ -46,6 +43,7 @@ interface CheckIn {
     id: string
     file_url: string
     file_type: string
+    signed_url?: string  // We'll populate this with signed URLs
   }[]
 }
 
@@ -81,31 +79,47 @@ interface GroupedCheckIns {
 export default function CheckInHistoryPage() {
   const [checkIns, setCheckIns] = useState<CheckIn[]>([])
   const [loading, setLoading] = useState(true)
+  const [failedImages, setFailedImages] = useState<Set<string>>(new Set())
   const supabase = createClient()
 
   useEffect(() => {
     loadCheckIns()
   }, [])
 
-  // Helper to get proper image URL from Supabase storage
-  const getImageUrl = (fileUrl: string): string => {
-    console.log('=== getImageUrl DEBUG ===')
-    console.log('Input fileUrl:', fileUrl)
-
-    // If it's already a full URL (contains http), use it directly
+  // Extract storage path from a file_url (handles both paths and full URLs)
+  const getStoragePath = (fileUrl: string): string => {
     if (fileUrl.startsWith('http')) {
-      console.log('Already full URL, returning as-is')
-      return fileUrl
+      // Extract path from full URL
+      const match = fileUrl.match(/\/uploads\/(.+)$/)
+      if (match) {
+        return decodeURIComponent(match[1])
+      }
     }
-
-    // Otherwise, construct the full public URL
-    const fullUrl = `${SUPABASE_URL}/storage/v1/object/public/uploads/${fileUrl}`
-    console.log('Constructed URL:', fullUrl)
-    return fullUrl
+    return fileUrl
   }
 
-  // Track failed images
-  const [failedImages, setFailedImages] = useState<Set<string>>(new Set())
+  // Generate signed URL for an upload
+  const getSignedUrl = async (fileUrl: string): Promise<string | null> => {
+    try {
+      const storagePath = getStoragePath(fileUrl)
+      console.log('Getting signed URL for:', storagePath)
+
+      const { data, error } = await supabase.storage
+        .from('uploads')
+        .createSignedUrl(storagePath, 3600)
+
+      if (error) {
+        console.error('Signed URL error:', error)
+        return null
+      }
+
+      console.log('Signed URL:', data.signedUrl)
+      return data.signedUrl
+    } catch (error) {
+      console.error('Error getting signed URL:', error)
+      return null
+    }
+  }
 
   const handleImageError = (uploadId: string) => {
     console.log('Image failed to load:', uploadId)
@@ -149,7 +163,20 @@ export default function CheckInHistoryPage() {
         return
       }
 
-      setCheckIns(data as CheckIn[] || [])
+      // Generate signed URLs for all uploads
+      const checkInsWithSignedUrls = await Promise.all(
+        (data as CheckIn[] || []).map(async (checkIn) => {
+          const uploadsWithUrls = await Promise.all(
+            checkIn.uploads.map(async (upload) => {
+              const signedUrl = await getSignedUrl(upload.file_url)
+              return { ...upload, signed_url: signedUrl || undefined }
+            })
+          )
+          return { ...checkIn, uploads: uploadsWithUrls }
+        })
+      )
+
+      setCheckIns(checkInsWithSignedUrls)
     } catch (error) {
       console.error('Error:', error)
     } finally {
@@ -436,9 +463,9 @@ export default function CheckInHistoryPage() {
                                 className="relative w-16 h-16 rounded-lg overflow-hidden flex-shrink-0"
                                 style={{ background: 'var(--bg-elevated)' }}
                               >
-                                {upload.file_type.startsWith('image/') && !failedImages.has(upload.id) ? (
+                                {upload.file_type.startsWith('image/') && upload.signed_url && !failedImages.has(upload.id) ? (
                                   <img
-                                    src={getImageUrl(upload.file_url)}
+                                    src={upload.signed_url}
                                     alt=""
                                     className="w-full h-full object-cover"
                                     onError={() => handleImageError(upload.id)}
