@@ -270,10 +270,10 @@ export default function CheckInPage() {
       }
 
       // Success - show message and redirect
-      setMessage({ type: 'success', text: 'Check-in saved! Redirecting...' })
+      setMessage({ type: 'success', text: 'Check-in saved successfully!' })
       setTimeout(() => {
         router.push('/dashboard/check-in/history')
-      }, 1000)
+      }, 1500)
     } catch (error) {
       console.error('=== SAVE FAILED ===')
       console.error('Error:', error)

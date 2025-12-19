@@ -330,8 +330,10 @@ export default function CheckInDetailPage() {
         setNewUploads([])
       }
 
-      setMessage({ type: 'success', text: 'Changes saved!' })
-      setTimeout(() => setMessage(null), 3000)
+      setMessage({ type: 'success', text: 'Changes saved successfully!' })
+      setTimeout(() => {
+        router.push('/dashboard/check-in/history')
+      }, 1500)
     } catch (error) {
       console.error('Error saving:', error)
       setMessage({ type: 'error', text: 'Failed to save changes' })
