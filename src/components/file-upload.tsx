@@ -7,18 +7,18 @@ import {
   FileVideo,
   Loader2,
   Image as ImageIcon,
-  Clipboard,
+  Keyboard,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 
 export interface UploadedFile {
   id: string
   file_name: string
-  file_url: string
+  file_url: string  // This stores the storage path, not the full URL
   file_type: string
   file_size: number
   user_context: string
-  preview_url?: string
+  preview_url?: string  // This is a signed URL for display
 }
 
 interface FileUploadProps {
@@ -36,27 +36,33 @@ export default function FileUpload({ userId, files, onFilesChange }: FileUploadP
   const [isDragging, setIsDragging] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({})
-  const [pasteError, setPasteError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const containerRef = useRef<HTMLDivElement>(null)
   const supabase = createClient()
 
-  // Store handleFilesUpload in a ref so paste handler can access it
+  // Store handleFilesUpload in a ref so paste handler can access latest version
   const handleFilesUploadRef = useRef<(files: File[]) => Promise<void>>()
 
-  // Handle clipboard paste via Ctrl+V
+  // Handle clipboard paste via Ctrl+V / Cmd+V - this is the primary paste method
   useEffect(() => {
     const handlePaste = async (e: ClipboardEvent) => {
+      console.log('=== PASTE EVENT ===')
       const items = e.clipboardData?.items
-      if (!items) return
+      if (!items) {
+        console.log('No clipboard items')
+        return
+      }
 
+      console.log('Clipboard items count:', items.length)
       const imageFiles: File[] = []
 
       for (let i = 0; i < items.length; i++) {
         const item = items[i]
-        if (item.type.startsWith('image/')) {
+        console.log(`Item ${i}: kind=${item.kind}, type=${item.type}`)
+
+        if (item.kind === 'file' && item.type.startsWith('image/')) {
           const file = item.getAsFile()
           if (file) {
+            console.log(`Got file: ${file.name}, size: ${file.size}`)
             const timestamp = Date.now()
             const extension = file.type.split('/')[1] || 'png'
             const namedFile = new File([file], `clipboard_${timestamp}.${extension}`, {
@@ -68,102 +74,19 @@ export default function FileUpload({ userId, files, onFilesChange }: FileUploadP
       }
 
       if (imageFiles.length > 0) {
+        console.log(`Found ${imageFiles.length} image(s) to upload`)
         e.preventDefault()
         if (handleFilesUploadRef.current) {
           await handleFilesUploadRef.current(imageFiles)
         }
+      } else {
+        console.log('No images found in clipboard')
       }
     }
 
     window.addEventListener('paste', handlePaste)
     return () => window.removeEventListener('paste', handlePaste)
   }, [])
-
-  // Handle click to paste from clipboard using Clipboard API
-  const handlePasteFromClipboard = async () => {
-    setPasteError(null)
-
-    console.log('=== CLIPBOARD DEBUG START ===')
-    console.log('navigator.clipboard available:', !!navigator.clipboard)
-    console.log('navigator.clipboard.read available:', !!(navigator.clipboard?.read))
-
-    try {
-      // Check if clipboard API is available
-      if (!navigator.clipboard || !navigator.clipboard.read) {
-        console.log('Clipboard API not available')
-        setPasteError('Clipboard API not available. Press Ctrl+V (Cmd+V on Mac) to paste instead.')
-        setTimeout(() => setPasteError(null), 5000)
-        return
-      }
-
-      console.log('Attempting to read clipboard...')
-      const clipboardItems = await navigator.clipboard.read()
-      console.log('Clipboard items count:', clipboardItems.length)
-
-      const imageFiles: File[] = []
-
-      for (let i = 0; i < clipboardItems.length; i++) {
-        const item = clipboardItems[i]
-        console.log(`Item ${i} types:`, item.types)
-
-        // Look for image types in the clipboard item
-        const imageTypes = item.types.filter(type => type.startsWith('image/'))
-        console.log(`Item ${i} image types:`, imageTypes)
-
-        if (imageTypes.length > 0) {
-          try {
-            const blob = await item.getType(imageTypes[0])
-            console.log(`Got blob for ${imageTypes[0]}, size:`, blob.size)
-            const timestamp = Date.now()
-            const extension = imageTypes[0].split('/')[1] || 'png'
-            const file = new File([blob], `clipboard_${timestamp}.${extension}`, { type: imageTypes[0] })
-            imageFiles.push(file)
-          } catch (blobError) {
-            console.error(`Failed to get blob for ${imageTypes[0]}:`, blobError)
-          }
-        }
-
-        // Also check for text/html which might contain image data
-        if (item.types.includes('text/html')) {
-          console.log('Found text/html in clipboard - might contain image reference')
-        }
-      }
-
-      console.log('Total image files found:', imageFiles.length)
-
-      if (imageFiles.length === 0) {
-        setPasteError('No images in clipboard. Copy an image first, or press Ctrl+V to paste.')
-        setTimeout(() => setPasteError(null), 4000)
-        return
-      }
-
-      await handleFilesUpload(imageFiles)
-      console.log('=== CLIPBOARD DEBUG END - SUCCESS ===')
-    } catch (error) {
-      console.error('=== CLIPBOARD DEBUG ERROR ===')
-      console.error('Error name:', error instanceof Error ? error.name : 'unknown')
-      console.error('Error message:', error instanceof Error ? error.message : String(error))
-      console.error('Full error:', error)
-
-      // Provide specific error messages based on the error type
-      let errorMessage = ''
-
-      if (error instanceof Error) {
-        if (error.name === 'NotAllowedError') {
-          errorMessage = 'Clipboard access denied. Press Ctrl+V (Cmd+V on Mac) to paste instead.'
-        } else if (error.name === 'NotFoundError') {
-          errorMessage = 'No image in clipboard. Copy an image first, then press Ctrl+V.'
-        } else {
-          errorMessage = `Clipboard error: ${error.message}. Try pressing Ctrl+V instead.`
-        }
-      } else {
-        errorMessage = 'Could not access clipboard. Press Ctrl+V (Cmd+V on Mac) to paste.'
-      }
-
-      setPasteError(errorMessage)
-      setTimeout(() => setPasteError(null), 5000)
-    }
-  }
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -174,6 +97,24 @@ export default function FileUpload({ userId, files, onFilesChange }: FileUploadP
     e.preventDefault()
     setIsDragging(false)
   }, [])
+
+  // Generate a signed URL for displaying an image (works for private buckets)
+  const getSignedUrl = async (storagePath: string): Promise<string | null> => {
+    try {
+      const { data, error } = await supabase.storage
+        .from('uploads')
+        .createSignedUrl(storagePath, 3600) // 1 hour expiry
+
+      if (error) {
+        console.error('Failed to create signed URL:', error)
+        return null
+      }
+      return data.signedUrl
+    } catch (error) {
+      console.error('Error creating signed URL:', error)
+      return null
+    }
+  }
 
   const uploadFile = async (file: File): Promise<UploadedFile | null> => {
     if (!ACCEPTED_TYPES.includes(file.type)) {
@@ -188,36 +129,40 @@ export default function FileUpload({ userId, files, onFilesChange }: FileUploadP
 
     const timestamp = Date.now()
     const sanitizedName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_')
-    const filePath = `${userId}/${timestamp}_${sanitizedName}`
+    const storagePath = `${userId}/${timestamp}_${sanitizedName}`
+
+    console.log('=== UPLOADING FILE ===')
+    console.log('Storage path:', storagePath)
 
     try {
       const { error } = await supabase.storage
         .from('uploads')
-        .upload(filePath, file, {
+        .upload(storagePath, file, {
           cacheControl: '3600',
           upsert: false,
         })
 
-      if (error) throw error
+      if (error) {
+        console.error('Upload error:', error)
+        throw error
+      }
 
-      // Get public URL - construct it directly to ensure correct format
-      const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://soalrvabjfhujvaxlbcm.supabase.co'
-      const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/uploads/${filePath}`
+      console.log('Upload successful')
 
-      console.log('=== FILE UPLOAD DEBUG ===')
-      console.log('File path:', filePath)
-      console.log('Public URL:', publicUrl)
+      // Get a signed URL for preview (works for private buckets)
+      const signedUrl = await getSignedUrl(storagePath)
+      console.log('Signed URL:', signedUrl)
 
       const isImage = ACCEPTED_IMAGE_TYPES.includes(file.type)
 
       return {
         id: `temp_${timestamp}_${Math.random().toString(36).slice(2)}`,
         file_name: file.name,
-        file_url: publicUrl,
+        file_url: storagePath,  // Store the path, not the full URL
         file_type: file.type,
         file_size: file.size,
         user_context: '',
-        preview_url: isImage ? publicUrl : undefined,
+        preview_url: isImage && signedUrl ? signedUrl : undefined,
       }
     } catch (error) {
       console.error('Upload error:', error)
@@ -275,15 +220,15 @@ export default function FileUpload({ userId, files, onFilesChange }: FileUploadP
   }
 
   const removeFile = async (fileToRemove: UploadedFile) => {
-    // Extract file path from URL for deletion
+    // file_url now stores the storage path directly
     try {
-      const url = new URL(fileToRemove.file_url)
-      const pathParts = url.pathname.split('/uploads/')
-      if (pathParts.length > 1) {
-        const filePath = decodeURIComponent(pathParts[1])
-        await supabase.storage
-          .from('uploads')
-          .remove([filePath])
+      console.log('Removing file:', fileToRemove.file_url)
+      const { error } = await supabase.storage
+        .from('uploads')
+        .remove([fileToRemove.file_url])
+
+      if (error) {
+        console.error('Error deleting file from storage:', error)
       }
     } catch (error) {
       console.error('Error deleting file:', error)
@@ -301,7 +246,7 @@ export default function FileUpload({ userId, files, onFilesChange }: FileUploadP
   const isImage = (fileType: string) => ACCEPTED_IMAGE_TYPES.includes(fileType)
 
   return (
-    <div ref={containerRef} className="space-y-4">
+    <div className="space-y-4">
       {/* Drop zone */}
       <div
         onClick={() => fileInputRef.current?.click()}
@@ -350,27 +295,13 @@ export default function FileUpload({ userId, files, onFilesChange }: FileUploadP
               <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>
                 Images (PNG, JPG, GIF) and videos (MP4, WebM) up to 50MB
               </p>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  handlePasteFromClipboard()
-                }}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium transition-all duration-200 hover:scale-105"
-                style={{
-                  background: 'var(--bg-card)',
-                  border: '1px solid var(--border-default)',
-                  color: 'var(--text-secondary)',
-                }}
+              <div
+                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs"
+                style={{ background: 'var(--bg-card)', color: 'var(--text-muted)' }}
               >
-                <Clipboard className="w-4 h-4" />
-                <span>or click to paste from clipboard</span>
-              </button>
-              {pasteError && (
-                <p className="text-xs mt-2" style={{ color: 'var(--accent-coral)' }}>
-                  {pasteError}
-                </p>
-              )}
+                <Keyboard className="w-3.5 h-3.5" />
+                <span>Tip: Press Ctrl+V (Cmd+V) to paste from clipboard</span>
+              </div>
             </>
           )}
         </div>
@@ -413,6 +344,11 @@ export default function FileUpload({ userId, files, onFilesChange }: FileUploadP
                     src={file.preview_url}
                     alt={file.file_name}
                     className="w-full h-full object-cover"
+                    onError={(e) => {
+                      console.log('Image load error for:', file.file_name)
+                      // Hide broken image
+                      e.currentTarget.style.display = 'none'
+                    }}
                   />
                 ) : (
                   <div
