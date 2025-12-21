@@ -50,7 +50,7 @@ export default function DayTypeSelector({ value, onChange }: DayTypeSelectorProp
         className="block text-sm font-medium"
         style={{ color: 'var(--text-secondary)' }}
       >
-        How would you describe today?
+        What kind of update is this?
       </label>
       <div className="flex flex-wrap gap-3">
         {dayTypeOptions.map((option) => {
