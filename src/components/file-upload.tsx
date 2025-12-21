@@ -19,6 +19,8 @@ export interface UploadedFile {
   file_size: number
   user_context: string
   preview_url?: string  // This is a signed URL for display
+  what_am_i_looking_at?: string  // Enhanced prompt: What am I looking at?
+  why_does_this_matter?: string  // Enhanced prompt: Why does this matter?
 }
 
 interface FileUploadProps {
@@ -237,9 +239,9 @@ export default function FileUpload({ userId, files, onFilesChange }: FileUploadP
     onFilesChange(files.filter(f => f.id !== fileToRemove.id))
   }
 
-  const updateFileNote = (fileId: string, note: string) => {
+  const updateFileField = (fileId: string, field: keyof UploadedFile, value: string) => {
     onFilesChange(
-      files.map(f => f.id === fileId ? { ...f, user_context: note } : f)
+      files.map(f => f.id === fileId ? { ...f, [field]: value } : f)
     )
   }
 
@@ -383,20 +385,48 @@ export default function FileUpload({ userId, files, onFilesChange }: FileUploadP
                 </div>
               </div>
 
-              {/* Context note */}
-              <div className="p-3">
-                <input
-                  type="text"
-                  value={file.user_context}
-                  onChange={(e) => updateFileNote(file.id, e.target.value)}
-                  placeholder="Add context note (optional)"
-                  className="w-full px-3 py-2 rounded-lg text-sm transition-all duration-200"
-                  style={{
-                    background: 'var(--bg-card)',
-                    border: '1px solid var(--border-subtle)',
-                    color: 'var(--text-primary)',
-                  }}
-                />
+              {/* Enhanced context prompts */}
+              <div className="p-3 space-y-3">
+                <div>
+                  <label
+                    className="block text-xs font-medium mb-1"
+                    style={{ color: 'var(--text-muted)' }}
+                  >
+                    What am I looking at?
+                  </label>
+                  <input
+                    type="text"
+                    value={file.what_am_i_looking_at || ''}
+                    onChange={(e) => updateFileField(file.id, 'what_am_i_looking_at', e.target.value)}
+                    placeholder="Describe what's shown in this image..."
+                    className="w-full px-3 py-2 rounded-lg text-sm transition-all duration-200"
+                    style={{
+                      background: 'var(--bg-card)',
+                      border: '1px solid var(--border-subtle)',
+                      color: 'var(--text-primary)',
+                    }}
+                  />
+                </div>
+                <div>
+                  <label
+                    className="block text-xs font-medium mb-1"
+                    style={{ color: 'var(--text-muted)' }}
+                  >
+                    Why does this matter?
+                  </label>
+                  <input
+                    type="text"
+                    value={file.why_does_this_matter || ''}
+                    onChange={(e) => updateFileField(file.id, 'why_does_this_matter', e.target.value)}
+                    placeholder="Why is this significant for your progress?"
+                    className="w-full px-3 py-2 rounded-lg text-sm transition-all duration-200"
+                    style={{
+                      background: 'var(--bg-card)',
+                      border: '1px solid var(--border-subtle)',
+                      color: 'var(--text-primary)',
+                    }}
+                  />
+                </div>
               </div>
             </div>
           ))}
