@@ -7,7 +7,9 @@ import {
   FileVideo,
   Loader2,
   Image as ImageIcon,
-  Keyboard,
+  Plus,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 
@@ -37,34 +39,26 @@ const MAX_FILE_SIZE = 50 * 1024 * 1024 // 50MB
 export default function FileUpload({ userId, files, onFilesChange }: FileUploadProps) {
   const [isDragging, setIsDragging] = useState(false)
   const [uploading, setUploading] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({})
+  const [expandedFileId, setExpandedFileId] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const supabase = createClient()
 
   // Store handleFilesUpload in a ref so paste handler can access latest version
   const handleFilesUploadRef = useRef<(files: File[]) => Promise<void>>()
 
-  // Handle clipboard paste via Ctrl+V / Cmd+V - this is the primary paste method
+  // Handle clipboard paste via Ctrl+V / Cmd+V
   useEffect(() => {
     const handlePaste = async (e: ClipboardEvent) => {
-      console.log('=== PASTE EVENT ===')
       const items = e.clipboardData?.items
-      if (!items) {
-        console.log('No clipboard items')
-        return
-      }
+      if (!items) return
 
-      console.log('Clipboard items count:', items.length)
       const imageFiles: File[] = []
 
       for (let i = 0; i < items.length; i++) {
         const item = items[i]
-        console.log(`Item ${i}: kind=${item.kind}, type=${item.type}`)
-
         if (item.kind === 'file' && item.type.startsWith('image/')) {
           const file = item.getAsFile()
           if (file) {
-            console.log(`Got file: ${file.name}, size: ${file.size}`)
             const timestamp = Date.now()
             const extension = file.type.split('/')[1] || 'png'
             const namedFile = new File([file], `clipboard_${timestamp}.${extension}`, {
@@ -76,13 +70,10 @@ export default function FileUpload({ userId, files, onFilesChange }: FileUploadP
       }
 
       if (imageFiles.length > 0) {
-        console.log(`Found ${imageFiles.length} image(s) to upload`)
         e.preventDefault()
         if (handleFilesUploadRef.current) {
           await handleFilesUploadRef.current(imageFiles)
         }
-      } else {
-        console.log('No images found in clipboard')
       }
     }
 
@@ -100,41 +91,27 @@ export default function FileUpload({ userId, files, onFilesChange }: FileUploadP
     setIsDragging(false)
   }, [])
 
-  // Generate a signed URL for displaying an image (works for private buckets)
+  // Generate a signed URL for displaying an image
   const getSignedUrl = async (storagePath: string): Promise<string | null> => {
     try {
       const { data, error } = await supabase.storage
         .from('uploads')
-        .createSignedUrl(storagePath, 3600) // 1 hour expiry
+        .createSignedUrl(storagePath, 3600)
 
-      if (error) {
-        console.error('Failed to create signed URL:', error)
-        return null
-      }
+      if (error) return null
       return data.signedUrl
-    } catch (error) {
-      console.error('Error creating signed URL:', error)
+    } catch {
       return null
     }
   }
 
   const uploadFile = async (file: File): Promise<UploadedFile | null> => {
-    if (!ACCEPTED_TYPES.includes(file.type)) {
-      console.error('Invalid file type:', file.type)
-      return null
-    }
-
-    if (file.size > MAX_FILE_SIZE) {
-      console.error('File too large:', file.size)
-      return null
-    }
+    if (!ACCEPTED_TYPES.includes(file.type)) return null
+    if (file.size > MAX_FILE_SIZE) return null
 
     const timestamp = Date.now()
     const sanitizedName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_')
     const storagePath = `${userId}/${timestamp}_${sanitizedName}`
-
-    console.log('=== UPLOADING FILE ===')
-    console.log('Storage path:', storagePath)
 
     try {
       const { error } = await supabase.storage
@@ -144,30 +121,21 @@ export default function FileUpload({ userId, files, onFilesChange }: FileUploadP
           upsert: false,
         })
 
-      if (error) {
-        console.error('Upload error:', error)
-        throw error
-      }
+      if (error) throw error
 
-      console.log('Upload successful')
-
-      // Get a signed URL for preview (works for private buckets)
       const signedUrl = await getSignedUrl(storagePath)
-      console.log('Signed URL:', signedUrl)
-
       const isImage = ACCEPTED_IMAGE_TYPES.includes(file.type)
 
       return {
         id: `temp_${timestamp}_${Math.random().toString(36).slice(2)}`,
         file_name: file.name,
-        file_url: storagePath,  // Store the path, not the full URL
+        file_url: storagePath,
         file_type: file.type,
         file_size: file.size,
         user_context: '',
         preview_url: isImage && signedUrl ? signedUrl : undefined,
       }
-    } catch (error) {
-      console.error('Upload error:', error)
+    } catch {
       return null
     }
   }
@@ -184,22 +152,16 @@ export default function FileUpload({ userId, files, onFilesChange }: FileUploadP
     const uploadedFiles: UploadedFile[] = []
 
     for (const file of validFiles) {
-      setUploadProgress(prev => ({ ...prev, [file.name]: 0 }))
-
       const uploaded = await uploadFile(file)
-
       if (uploaded) {
         uploadedFiles.push(uploaded)
-        setUploadProgress(prev => ({ ...prev, [file.name]: 100 }))
       }
     }
 
     onFilesChange([...files, ...uploadedFiles])
     setUploading(false)
-    setUploadProgress({})
   }
 
-  // Keep ref updated for paste handler
   handleFilesUploadRef.current = handleFilesUpload
 
   const handleFiles = async (fileList: FileList) => {
@@ -222,21 +184,16 @@ export default function FileUpload({ userId, files, onFilesChange }: FileUploadP
   }
 
   const removeFile = async (fileToRemove: UploadedFile) => {
-    // file_url now stores the storage path directly
     try {
-      console.log('Removing file:', fileToRemove.file_url)
-      const { error } = await supabase.storage
-        .from('uploads')
-        .remove([fileToRemove.file_url])
-
-      if (error) {
-        console.error('Error deleting file from storage:', error)
-      }
-    } catch (error) {
-      console.error('Error deleting file:', error)
+      await supabase.storage.from('uploads').remove([fileToRemove.file_url])
+    } catch {
+      // Ignore storage errors
     }
 
     onFilesChange(files.filter(f => f.id !== fileToRemove.id))
+    if (expandedFileId === fileToRemove.id) {
+      setExpandedFileId(null)
+    }
   }
 
   const updateFileField = (fileId: string, field: keyof UploadedFile, value: string) => {
@@ -248,145 +205,119 @@ export default function FileUpload({ userId, files, onFilesChange }: FileUploadP
   const isImage = (fileType: string) => ACCEPTED_IMAGE_TYPES.includes(fileType)
 
   return (
-    <div className="space-y-4">
-      {/* Drop zone */}
+    <div className="space-y-3">
+      {/* Compact horizontal thumbnail row */}
       <div
-        onClick={() => fileInputRef.current?.click()}
+        className="flex items-center gap-3 overflow-x-auto pb-2"
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
-        className={`
-          relative p-8 rounded-xl border-2 border-dashed cursor-pointer
-          transition-all duration-200 hover:border-opacity-100
-          ${isDragging ? 'scale-[1.01]' : ''}
-        `}
-        style={{
-          background: isDragging ? 'rgba(255, 107, 107, 0.05)' : 'var(--bg-elevated)',
-          borderColor: isDragging ? 'var(--accent-coral)' : 'var(--border-default)',
-        }}
       >
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          accept={ACCEPTED_TYPES.join(',')}
-          onChange={handleFileSelect}
-          className="hidden"
-        />
+        {/* Existing files as thumbnails */}
+        {files.map((file) => (
+          <div key={file.id} className="flex-shrink-0">
+            <div
+              className={`relative w-16 h-16 rounded-lg overflow-hidden cursor-pointer group transition-all duration-200 ${
+                expandedFileId === file.id ? 'ring-2 ring-offset-2' : ''
+              }`}
+              style={{
+                background: 'var(--bg-elevated)',
+                ringColor: 'var(--accent-coral)',
+                ringOffsetColor: 'var(--bg-primary)',
+              }}
+              onClick={() => setExpandedFileId(expandedFileId === file.id ? null : file.id)}
+            >
+              {isImage(file.file_type) && file.preview_url ? (
+                <img
+                  src={file.preview_url}
+                  alt={file.file_name}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <div
+                  className="w-full h-full flex items-center justify-center"
+                  style={{ background: 'var(--bg-card)' }}
+                >
+                  <FileVideo className="w-6 h-6" style={{ color: 'var(--text-muted)' }} />
+                </div>
+              )}
 
-        <div className="text-center">
-          {uploading ? (
-            <>
-              <Loader2
-                className="w-10 h-10 mx-auto mb-3 animate-spin"
-                style={{ color: 'var(--accent-coral)' }}
-              />
-              <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                Uploading...
-              </p>
-            </>
-          ) : (
-            <>
-              <Upload
-                className="w-10 h-10 mx-auto mb-3"
-                style={{ color: isDragging ? 'var(--accent-coral)' : 'var(--text-muted)' }}
-              />
-              <p className="text-sm font-medium mb-1" style={{ color: 'var(--text-primary)' }}>
-                Drop files here or click to browse
-              </p>
-              <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>
-                Images (PNG, JPG, GIF) and videos (MP4, WebM) up to 50MB
-              </p>
-              <div
-                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs"
-                style={{ background: 'var(--bg-card)', color: 'var(--text-muted)' }}
+              {/* Delete button on hover */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  removeFile(file)
+                }}
+                className="absolute -top-1 -right-1 p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+                style={{ background: 'var(--accent-coral)' }}
               >
-                <Keyboard className="w-3.5 h-3.5" />
-                <span>Tip: Press Ctrl+V (Cmd+V) to paste from clipboard</span>
-              </div>
-            </>
-          )}
+                <X className="w-3 h-3 text-white" />
+              </button>
+            </div>
+          </div>
+        ))}
+
+        {/* Add button */}
+        <div className="flex-shrink-0">
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept={ACCEPTED_TYPES.join(',')}
+            onChange={handleFileSelect}
+            className="hidden"
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className={`w-16 h-16 rounded-lg border-2 border-dashed flex items-center justify-center cursor-pointer transition-all duration-200 hover:scale-105 ${
+              isDragging ? 'scale-105' : ''
+            }`}
+            style={{
+              borderColor: isDragging ? 'var(--accent-coral)' : 'var(--border-default)',
+              background: isDragging ? 'rgba(255, 107, 107, 0.05)' : 'transparent',
+            }}
+          >
+            {uploading ? (
+              <Loader2 className="w-5 h-5 animate-spin" style={{ color: 'var(--accent-coral)' }} />
+            ) : (
+              <Plus className="w-5 h-5" style={{ color: 'var(--text-muted)' }} />
+            )}
+          </button>
         </div>
       </div>
 
-      {/* Upload progress */}
-      {Object.keys(uploadProgress).length > 0 && (
-        <div className="space-y-2">
-          {Object.entries(uploadProgress).map(([fileName, progress]) => (
-            <div
-              key={fileName}
-              className="flex items-center gap-3 p-3 rounded-lg"
-              style={{ background: 'var(--bg-elevated)' }}
-            >
-              <Loader2 className="w-4 h-4 animate-spin" style={{ color: 'var(--accent-coral)' }} />
-              <span className="text-sm flex-1 truncate" style={{ color: 'var(--text-secondary)' }}>
-                {fileName}
-              </span>
-              <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                {progress}%
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
+      {/* Help text */}
+      <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+        Drop files, click +, or press Ctrl+V to paste
+      </p>
 
-      {/* Uploaded files */}
-      {files.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {files.map((file) => (
-            <div
-              key={file.id}
-              className="relative rounded-xl overflow-hidden group"
-              style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)' }}
-            >
-              {/* Preview */}
-              <div className="relative aspect-video">
-                {isImage(file.file_type) && file.preview_url ? (
-                  <img
-                    src={file.preview_url}
-                    alt={file.file_name}
-                    className="w-full h-full object-cover"
-                    onError={(e) => {
-                      console.log('Image load error for:', file.file_name)
-                      // Hide broken image
-                      e.currentTarget.style.display = 'none'
-                    }}
-                  />
-                ) : (
-                  <div
-                    className="w-full h-full flex items-center justify-center"
-                    style={{ background: 'var(--bg-card)' }}
+      {/* Expanded file details */}
+      {expandedFileId && files.find(f => f.id === expandedFileId) && (
+        <div
+          className="p-4 rounded-xl space-y-3 animate-fade-in-up"
+          style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)' }}
+        >
+          {(() => {
+            const file = files.find(f => f.id === expandedFileId)!
+            return (
+              <>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>
+                    {file.file_name}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setExpandedFileId(null)}
+                    className="p-1 rounded-lg hover:bg-opacity-20"
+                    style={{ color: 'var(--text-muted)' }}
                   >
-                    <FileVideo className="w-12 h-12" style={{ color: 'var(--text-muted)' }} />
-                  </div>
-                )}
-
-                {/* Delete button */}
-                <button
-                  type="button"
-                  onClick={() => removeFile(file)}
-                  className="absolute top-2 right-2 p-2 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200"
-                  style={{ background: 'rgba(0, 0, 0, 0.7)' }}
-                >
-                  <X className="w-4 h-4 text-white" />
-                </button>
-
-                {/* File type indicator */}
-                <div
-                  className="absolute bottom-2 left-2 px-2 py-1 rounded-md text-xs font-medium flex items-center gap-1"
-                  style={{ background: 'rgba(0, 0, 0, 0.7)', color: 'white' }}
-                >
-                  {isImage(file.file_type) ? (
-                    <ImageIcon className="w-3 h-3" />
-                  ) : (
-                    <FileVideo className="w-3 h-3" />
-                  )}
-                  <span>{file.file_name.split('.').pop()?.toUpperCase()}</span>
+                    <ChevronUp className="w-4 h-4" />
+                  </button>
                 </div>
-              </div>
 
-              {/* Enhanced context prompts */}
-              <div className="p-3 space-y-3">
                 <div>
                   <label
                     className="block text-xs font-medium mb-1"
@@ -398,8 +329,8 @@ export default function FileUpload({ userId, files, onFilesChange }: FileUploadP
                     type="text"
                     value={file.what_am_i_looking_at || ''}
                     onChange={(e) => updateFileField(file.id, 'what_am_i_looking_at', e.target.value)}
-                    placeholder="Describe what's shown in this image..."
-                    className="w-full px-3 py-2 rounded-lg text-sm transition-all duration-200"
+                    placeholder="Describe what's shown..."
+                    className="w-full px-3 py-2 rounded-lg text-sm"
                     style={{
                       background: 'var(--bg-card)',
                       border: '1px solid var(--border-subtle)',
@@ -407,6 +338,7 @@ export default function FileUpload({ userId, files, onFilesChange }: FileUploadP
                     }}
                   />
                 </div>
+
                 <div>
                   <label
                     className="block text-xs font-medium mb-1"
@@ -418,8 +350,8 @@ export default function FileUpload({ userId, files, onFilesChange }: FileUploadP
                     type="text"
                     value={file.why_does_this_matter || ''}
                     onChange={(e) => updateFileField(file.id, 'why_does_this_matter', e.target.value)}
-                    placeholder="Why is this significant for your progress?"
-                    className="w-full px-3 py-2 rounded-lg text-sm transition-all duration-200"
+                    placeholder="Why is this significant?"
+                    className="w-full px-3 py-2 rounded-lg text-sm"
                     style={{
                       background: 'var(--bg-card)',
                       border: '1px solid var(--border-subtle)',
@@ -427,9 +359,9 @@ export default function FileUpload({ userId, files, onFilesChange }: FileUploadP
                     }}
                   />
                 </div>
-              </div>
-            </div>
-          ))}
+              </>
+            )
+          })()}
         </div>
       )}
     </div>

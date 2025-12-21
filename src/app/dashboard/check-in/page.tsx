@@ -9,7 +9,6 @@ import {
   Moon,
   Star,
   AlertTriangle,
-  FileText,
   Save,
   Loader2,
   Check,
@@ -19,26 +18,23 @@ import {
   Youtube,
   Linkedin,
   HelpCircle,
+  Plus,
+  ChevronLeft,
+  Image as ImageIcon,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import ProjectSelector, { Project } from '@/components/project-selector'
 import FileUpload, { UploadedFile } from '@/components/file-upload'
 import DayTypeSelector, { DayType } from '@/components/day-type-selector'
 import QuestionPills from '@/components/question-pills'
 import VoiceInputPlaceholder from '@/components/voice-input-placeholder'
+import AutoExpandingTextarea, { AutoExpandingTextareaRef } from '@/components/auto-expanding-textarea'
 
 type CheckInType = 'morning' | 'midday' | 'evening'
 
-interface ProjectUpdate {
-  project_id: string
-  project_name: string
-  problem_to_solve: string
-  what_didnt_work: string
-  what_worked: string
-  surprise_learning: string
-  is_win: boolean
-  is_blocker: boolean
-  blocker_description: string
+interface Project {
+  id: string
+  name: string
+  status: string
 }
 
 const getCheckInType = (): CheckInType => {
@@ -50,22 +46,22 @@ const getCheckInType = (): CheckInType => {
 
 const checkInConfig = {
   morning: {
-    label: 'Morning Check-in',
+    label: 'Morning Update',
     icon: Sun,
     color: 'var(--accent-amber)',
-    greeting: 'Good morning! What problem are you tackling today?',
+    greeting: 'What are you working on?',
   },
   midday: {
-    label: 'Midday Check-in',
+    label: 'Midday Update',
     icon: CloudSun,
     color: 'var(--accent-teal)',
-    greeting: 'How\'s your day going? Share what you\'re learning.',
+    greeting: 'How\'s it going?',
   },
   evening: {
-    label: 'Evening Check-in',
+    label: 'Evening Update',
     icon: Moon,
     color: 'var(--accent-coral)',
-    greeting: 'Wrapping up? Let\'s capture your discoveries.',
+    greeting: 'What did you accomplish?',
   },
 }
 
@@ -74,22 +70,30 @@ export default function CheckInPage() {
   const [userId, setUserId] = useState<string | null>(null)
   const [checkInType] = useState<CheckInType>(getCheckInType)
   const [projects, setProjects] = useState<Project[]>([])
-  const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([])
-  const [projectUpdates, setProjectUpdates] = useState<Record<string, ProjectUpdate>>({})
-  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([])
-  const [generalNotes, setGeneralNotes] = useState('')
+  const [selectedProject, setSelectedProject] = useState<Project | null>(null)
+
+  // Form state
   const [dayType, setDayType] = useState<DayType>(null)
+  const [updateText, setUpdateText] = useState('')
+  const [problemToSolve, setProblemToSolve] = useState('')
+  const [whatDidntWork, setWhatDidntWork] = useState('')
+  const [whatWorked, setWhatWorked] = useState('')
+  const [surpriseLearning, setSurpriseLearning] = useState('')
+  const [isWin, setIsWin] = useState(false)
+  const [isBlocker, setIsBlocker] = useState(false)
+  const [blockerDescription, setBlockerDescription] = useState('')
   const [breakthroughs, setBreakthroughs] = useState('')
   const [flagYoutube, setFlagYoutube] = useState(false)
   const [flagLinkedin, setFlagLinkedin] = useState(false)
   const [inMyOwnWords, setInMyOwnWords] = useState('')
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([])
+
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
-  const [activeTextareaId, setActiveTextareaId] = useState<string | null>(null)
 
-  // Refs for textareas to insert question pill text
-  const textareaRefs = useRef<Record<string, HTMLTextAreaElement | null>>({})
+  // Ref for main textarea to insert question pill text
+  const mainTextareaRef = useRef<AutoExpandingTextareaRef>(null)
 
   const supabase = createClient()
   const config = checkInConfig[checkInType]
@@ -129,155 +133,68 @@ export default function CheckInPage() {
     }
   }
 
-  const handleProjectSelection = (ids: string[]) => {
-    setSelectedProjectIds(ids)
-
-    const newUpdates = { ...projectUpdates }
-    ids.forEach(id => {
-      if (!newUpdates[id]) {
-        const project = projects.find(p => p.id === id)
-        newUpdates[id] = {
-          project_id: id,
-          project_name: project?.name || 'Unknown',
-          problem_to_solve: '',
-          what_didnt_work: '',
-          what_worked: '',
-          surprise_learning: '',
-          is_win: false,
-          is_blocker: false,
-          blocker_description: '',
-        }
-      }
-    })
-
-    Object.keys(newUpdates).forEach(id => {
-      if (!ids.includes(id)) {
-        delete newUpdates[id]
-      }
-    })
-
-    setProjectUpdates(newUpdates)
-  }
-
-  const updateProjectUpdate = (
-    projectId: string,
-    field: keyof ProjectUpdate,
-    value: string | boolean
-  ) => {
-    setProjectUpdates(prev => ({
-      ...prev,
-      [projectId]: {
-        ...prev[projectId],
-        [field]: value,
-      },
-    }))
-  }
-
   const handlePillClick = (text: string) => {
-    if (activeTextareaId && textareaRefs.current[activeTextareaId]) {
-      const textarea = textareaRefs.current[activeTextareaId]!
-      const start = textarea.selectionStart
-      const end = textarea.selectionEnd
-      const currentValue = textarea.value
-      const newValue = currentValue.substring(0, start) + text + ' ' + currentValue.substring(end)
-
-      // Determine which field to update based on the textarea ID
-      if (activeTextareaId === 'generalNotes') {
-        setGeneralNotes(newValue)
-      } else if (activeTextareaId === 'breakthroughs') {
-        setBreakthroughs(newValue)
-      } else if (activeTextareaId === 'inMyOwnWords') {
-        setInMyOwnWords(newValue)
-      } else if (activeTextareaId.startsWith('problem_')) {
-        const projectId = activeTextareaId.replace('problem_', '')
-        updateProjectUpdate(projectId, 'problem_to_solve', newValue)
-      } else if (activeTextareaId.startsWith('didntwork_')) {
-        const projectId = activeTextareaId.replace('didntwork_', '')
-        updateProjectUpdate(projectId, 'what_didnt_work', newValue)
-      } else if (activeTextareaId.startsWith('worked_')) {
-        const projectId = activeTextareaId.replace('worked_', '')
-        updateProjectUpdate(projectId, 'what_worked', newValue)
-      } else if (activeTextareaId.startsWith('surprise_')) {
-        const projectId = activeTextareaId.replace('surprise_', '')
-        updateProjectUpdate(projectId, 'surprise_learning', newValue)
-      }
-
-      // Focus back on textarea
-      setTimeout(() => {
-        textarea.focus()
-        textarea.setSelectionRange(start + text.length + 1, start + text.length + 1)
-      }, 0)
+    if (mainTextareaRef.current) {
+      mainTextareaRef.current.insertText(text)
     }
   }
 
   const handleSave = async () => {
-    if (!userId) return
+    if (!userId || !selectedProject) return
 
     setSaving(true)
     setMessage(null)
 
     try {
-      // STEP 1: Create check-in record with new fields
-      console.log('=== STEP 1: Creating check_in ===')
-      const insertPayload = {
+      // Create check-in record
+      const checkInPayload = {
         user_id: userId,
         check_in_type: checkInType,
         check_in_date: todayISO,
-        general_notes: generalNotes || null,
+        general_notes: null,
         day_type: dayType,
         breakthroughs: breakthroughs || null,
         flag_youtube: flagYoutube,
         flag_linkedin: flagLinkedin,
         in_my_own_words: inMyOwnWords || null,
       }
-      console.log('Payload:', JSON.stringify(insertPayload, null, 2))
 
       const { data: checkInData, error: checkInError } = await supabase
         .from('check_ins')
-        .insert(insertPayload)
+        .insert(checkInPayload)
         .select()
         .single()
 
       if (checkInError) {
-        console.error('=== CHECK_INS INSERT FAILED ===')
-        console.error('Error:', checkInError)
-        throw new Error(`Check-in failed: ${checkInError.message} (${checkInError.code})`)
+        throw new Error(`Check-in failed: ${checkInError.message}`)
       }
 
       const checkInId = checkInData.id
-      console.log('=== CHECK_IN SUCCESS, ID:', checkInId, '===')
 
-      // STEP 2: Create project updates with new fields
-      if (Object.keys(projectUpdates).length > 0) {
-        console.log('=== STEP 2: Creating project_updates ===')
-        const projectUpdateRecords = Object.values(projectUpdates).map(update => ({
-          check_in_id: checkInId,
-          project_id: update.project_id,
-          problem_to_solve: update.problem_to_solve || null,
-          what_didnt_work: update.what_didnt_work || null,
-          what_worked: update.what_worked || null,
-          surprise_learning: update.surprise_learning || null,
-          is_win: update.is_win,
-          is_blocker: update.is_blocker,
-          blocker_description: update.is_blocker ? update.blocker_description : null,
-        }))
-        console.log('Payload:', JSON.stringify(projectUpdateRecords, null, 2))
-
-        const { error: updateError } = await supabase
-          .from('project_updates')
-          .insert(projectUpdateRecords)
-
-        if (updateError) {
-          console.error('=== PROJECT_UPDATES INSERT FAILED ===')
-          console.error('Error:', updateError)
-          throw new Error(`Project updates failed: ${updateError.message} (${updateError.code})`)
-        }
-        console.log('=== PROJECT_UPDATES SUCCESS ===')
+      // Create project update
+      const projectUpdatePayload = {
+        check_in_id: checkInId,
+        project_id: selectedProject.id,
+        update_text: updateText || null,
+        problem_to_solve: problemToSolve || null,
+        what_didnt_work: whatDidntWork || null,
+        what_worked: whatWorked || null,
+        surprise_learning: surpriseLearning || null,
+        is_win: isWin,
+        is_blocker: isBlocker,
+        blocker_description: isBlocker ? blockerDescription : null,
       }
 
-      // STEP 3: Create upload records with new fields
+      const { error: updateError } = await supabase
+        .from('project_updates')
+        .insert(projectUpdatePayload)
+
+      if (updateError) {
+        throw new Error(`Project update failed: ${updateError.message}`)
+      }
+
+      // Create upload records
       if (uploadedFiles.length > 0) {
-        console.log('=== STEP 3: Creating uploads ===')
         for (const file of uploadedFiles) {
           if (file.id.startsWith('temp_')) {
             const uploadPayload = {
@@ -291,30 +208,24 @@ export default function CheckInPage() {
               what_am_i_looking_at: file.what_am_i_looking_at || null,
               why_does_this_matter: file.why_does_this_matter || null,
             }
-            console.log('Upload payload:', JSON.stringify(uploadPayload, null, 2))
 
             const { error: uploadError } = await supabase
               .from('uploads')
               .insert(uploadPayload)
 
             if (uploadError) {
-              console.error('=== UPLOADS INSERT FAILED ===')
-              console.error('Error:', uploadError)
-              throw new Error(`Upload record failed: ${uploadError.message} (${uploadError.code})`)
+              throw new Error(`Upload failed: ${uploadError.message}`)
             }
           }
         }
-        console.log('=== UPLOADS SUCCESS ===')
       }
 
-      // Success - show message and redirect
-      setMessage({ type: 'success', text: 'Check-in saved successfully!' })
+      setMessage({ type: 'success', text: 'Update saved!' })
       setTimeout(() => {
         router.push('/dashboard/check-in/history')
       }, 1500)
     } catch (error) {
-      console.error('=== SAVE FAILED ===')
-      console.error('Error:', error)
+      console.error('Save failed:', error)
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       setMessage({ type: 'error', text: errorMessage })
     } finally {
@@ -336,12 +247,109 @@ export default function CheckInPage() {
     )
   }
 
+  // STEP 1: Project Selection (if no project selected)
+  if (!selectedProject) {
+    return (
+      <div className="space-y-8 max-w-3xl">
+        {/* Header */}
+        <header className="animate-fade-in-up">
+          <div className="flex items-center gap-2 mb-2">
+            <CalendarCheck className="w-5 h-5" style={{ color: config.color }} />
+            <span
+              className="text-sm font-medium uppercase tracking-wider"
+              style={{ color: 'var(--text-muted)' }}
+            >
+              New Update
+            </span>
+          </div>
+          <h1
+            className="text-3xl font-bold tracking-tight mb-2"
+            style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}
+          >
+            Which project are you updating?
+          </h1>
+          <p style={{ color: 'var(--text-secondary)' }}>
+            Select the project you&apos;re working on
+          </p>
+        </header>
+
+        {/* Project Cards */}
+        <div className="grid gap-4 sm:grid-cols-2 animate-fade-in-up-delay-1">
+          {projects.map((project) => (
+            <button
+              key={project.id}
+              type="button"
+              onClick={() => setSelectedProject(project)}
+              className="p-5 rounded-xl text-left transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
+              style={{
+                background: 'var(--bg-card)',
+                border: '1px solid var(--border-subtle)',
+              }}
+            >
+              <h3
+                className="text-lg font-semibold mb-1"
+                style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}
+              >
+                {project.name}
+              </h3>
+              <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+                Click to add an update
+              </p>
+            </button>
+          ))}
+
+          {/* Add New Project */}
+          <button
+            type="button"
+            onClick={() => router.push('/dashboard/projects')}
+            className="p-5 rounded-xl text-left border-2 border-dashed transition-all duration-200 hover:scale-[1.02]"
+            style={{
+              borderColor: 'var(--border-default)',
+              background: 'transparent',
+            }}
+          >
+            <div className="flex items-center gap-3">
+              <div
+                className="w-10 h-10 rounded-lg flex items-center justify-center"
+                style={{ background: 'var(--bg-elevated)' }}
+              >
+                <Plus className="w-5 h-5" style={{ color: 'var(--text-muted)' }} />
+              </div>
+              <div>
+                <h3
+                  className="text-base font-semibold"
+                  style={{ color: 'var(--text-secondary)' }}
+                >
+                  New Project
+                </h3>
+                <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+                  Create a project first
+                </p>
+              </div>
+            </div>
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // STEP 2: Update Form (project selected)
   return (
-    <div className="space-y-10 max-w-3xl">
-      {/* Header */}
+    <div className="space-y-8 max-w-3xl">
+      {/* Header with back button */}
       <header className="animate-fade-in-up">
+        <button
+          type="button"
+          onClick={() => setSelectedProject(null)}
+          className="flex items-center gap-2 mb-4 text-sm hover:opacity-80 transition-opacity"
+          style={{ color: 'var(--text-muted)' }}
+        >
+          <ChevronLeft className="w-4 h-4" />
+          Change project
+        </button>
+
         <div className="flex items-center gap-2 mb-2">
-          <CalendarCheck className="w-5 h-5" style={{ color: config.color }} />
+          <Icon className="w-5 h-5" style={{ color: config.color }} />
           <span
             className="text-sm font-medium uppercase tracking-wider"
             style={{ color: 'var(--text-muted)' }}
@@ -349,26 +357,12 @@ export default function CheckInPage() {
             {config.label}
           </span>
         </div>
-        <div className="flex items-center gap-4 mb-3">
-          <h1
-            className="text-4xl font-bold tracking-tight"
-            style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}
-          >
-            {today}
-          </h1>
-          <div
-            className="px-4 py-2 rounded-xl flex items-center gap-2"
-            style={{ background: `${config.color}20` }}
-          >
-            <Icon className="w-5 h-5" style={{ color: config.color }} />
-            <span className="text-sm font-medium" style={{ color: config.color }}>
-              {checkInType.charAt(0).toUpperCase() + checkInType.slice(1)}
-            </span>
-          </div>
-        </div>
-        <p style={{ color: 'var(--text-secondary)' }}>
-          {config.greeting}
-        </p>
+        <h1
+          className="text-3xl font-bold tracking-tight"
+          style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}
+        >
+          {selectedProject.name}
+        </h1>
       </header>
 
       {/* Messages */}
@@ -394,370 +388,300 @@ export default function CheckInPage() {
         </div>
       )}
 
-      {/* Day Type Selector - replaces mood */}
-      <section
-        className="p-8 rounded-2xl animate-fade-in-up"
-        style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}
-      >
+      {/* Update Type */}
+      <section className="animate-fade-in-up">
         <DayTypeSelector value={dayType} onChange={setDayType} />
       </section>
 
-      {/* Section 1: Projects */}
-      <section
-        className="p-8 rounded-2xl animate-fade-in-up-delay-1"
-        style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}
-      >
-        <div className="flex items-center gap-3 mb-6">
-          <div
-            className="w-12 h-12 rounded-xl flex items-center justify-center"
-            style={{ background: 'rgba(255, 107, 107, 0.15)' }}
+      {/* Divider */}
+      <div style={{ borderTop: '1px solid var(--border-subtle)' }} />
+
+      {/* What happened? - Main field */}
+      <section className="space-y-3 animate-fade-in-up-delay-1">
+        <div className="flex items-center justify-between">
+          <label
+            className="text-base font-semibold"
+            style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}
           >
-            <CalendarCheck className="w-6 h-6" style={{ color: 'var(--accent-coral)' }} />
+            What happened?
+          </label>
+          <VoiceInputPlaceholder />
+        </div>
+        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+          Brain dump everything. Get as much out of your head as you can. Don&apos;t worry about structure - just capture what happened.
+        </p>
+        <AutoExpandingTextarea
+          ref={mainTextareaRef}
+          value={updateText}
+          onChange={setUpdateText}
+          placeholder="Start typing or click a prompt below..."
+          minRows={4}
+          maxRows={15}
+        />
+        <QuestionPills onPillClick={handlePillClick} />
+      </section>
+
+      {/* Divider */}
+      <div style={{ borderTop: '1px solid var(--border-subtle)' }} />
+
+      {/* Structured detail fields */}
+      <section className="space-y-5 animate-fade-in-up-delay-1">
+        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+          Optional: Add more detail if you want
+        </p>
+
+        {/* Problem to solve */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <label className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>
+              What problem were you trying to solve?
+            </label>
+            <VoiceInputPlaceholder />
           </div>
-          <div>
-            <h2
-              className="text-xl font-semibold"
-              style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}
-            >
-              What are you working on?
-            </h2>
-            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-              Select the projects you&apos;re updating today
-            </p>
-          </div>
+          <AutoExpandingTextarea
+            value={problemToSolve}
+            onChange={setProblemToSolve}
+            placeholder="The challenge or goal..."
+            minRows={2}
+            maxRows={8}
+          />
         </div>
 
-        <ProjectSelector
-          projects={projects}
-          selectedIds={selectedProjectIds}
-          onSelectionChange={handleProjectSelection}
+        {/* What didn't work */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <label className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>
+              What didn&apos;t work?
+            </label>
+            <VoiceInputPlaceholder />
+          </div>
+          <AutoExpandingTextarea
+            value={whatDidntWork}
+            onChange={setWhatDidntWork}
+            placeholder="Approaches that failed..."
+            minRows={2}
+            maxRows={8}
+          />
+        </div>
+
+        {/* What worked */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <label className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>
+              What finally worked?
+            </label>
+            <VoiceInputPlaceholder />
+          </div>
+          <AutoExpandingTextarea
+            value={whatWorked}
+            onChange={setWhatWorked}
+            placeholder="The solution..."
+            minRows={2}
+            maxRows={8}
+          />
+        </div>
+
+        {/* Surprise learning */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <label className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>
+              Any surprises or unexpected learnings?
+            </label>
+            <VoiceInputPlaceholder />
+          </div>
+          <AutoExpandingTextarea
+            value={surpriseLearning}
+            onChange={setSurpriseLearning}
+            placeholder="Something unexpected..."
+            minRows={2}
+            maxRows={8}
+          />
+        </div>
+      </section>
+
+      {/* Quick flags */}
+      <section className="flex flex-wrap gap-3 animate-fade-in-up-delay-1">
+        <button
+          type="button"
+          onClick={() => setIsWin(!isWin)}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200"
+          style={{
+            background: isWin ? 'rgba(245, 158, 11, 0.15)' : 'var(--bg-elevated)',
+            border: `1px solid ${isWin ? 'var(--accent-amber)' : 'var(--border-default)'}`,
+            color: isWin ? 'var(--accent-amber)' : 'var(--text-secondary)',
+          }}
+        >
+          <Star className={`w-4 h-4 ${isWin ? 'fill-current' : ''}`} />
+          Mark as win
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setIsBlocker(!isBlocker)}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200"
+          style={{
+            background: isBlocker ? 'rgba(255, 107, 107, 0.15)' : 'var(--bg-elevated)',
+            border: `1px solid ${isBlocker ? 'var(--accent-coral)' : 'var(--border-default)'}`,
+            color: isBlocker ? 'var(--accent-coral)' : 'var(--text-secondary)',
+          }}
+        >
+          <AlertTriangle className="w-4 h-4" />
+          Flag as blocker
+        </button>
+      </section>
+
+      {isBlocker && (
+        <div className="space-y-2 animate-fade-in-up">
+          <label className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>
+            What&apos;s blocking you?
+          </label>
+          <AutoExpandingTextarea
+            value={blockerDescription}
+            onChange={setBlockerDescription}
+            placeholder="Describe the blocker..."
+            minRows={2}
+            maxRows={5}
+            style={{ borderColor: 'var(--accent-coral)' }}
+          />
+        </div>
+      )}
+
+      {/* Divider */}
+      <div style={{ borderTop: '1px solid var(--border-subtle)' }} />
+
+      {/* Breakthroughs */}
+      <section className="space-y-3 animate-fade-in-up-delay-2">
+        <div className="flex items-center gap-3">
+          <Sparkles className="w-5 h-5" style={{ color: 'var(--accent-amber)' }} />
+          <label
+            className="text-base font-semibold"
+            style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}
+          >
+            Any major wins or discoveries?
+          </label>
+          <VoiceInputPlaceholder />
+        </div>
+        <AutoExpandingTextarea
+          value={breakthroughs}
+          onChange={setBreakthroughs}
+          placeholder="Big 'aha' moments or breakthroughs..."
+          minRows={3}
+          maxRows={10}
         />
 
-        {/* Problem-first project update forms */}
-        {selectedProjectIds.length > 0 && (
-          <div className="mt-8 space-y-6">
-            {selectedProjectIds.map((projectId) => {
-              const update = projectUpdates[projectId]
-              if (!update) return null
-
-              return (
-                <div
-                  key={projectId}
-                  className="p-5 rounded-xl"
-                  style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)' }}
-                >
-                  <h3
-                    className="text-base font-semibold mb-4"
-                    style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}
-                  >
-                    {update.project_name}
-                  </h3>
-
-                  <div className="space-y-4">
-                    {/* Primary: Problem to solve */}
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <label
-                          className="text-sm font-medium"
-                          style={{ color: 'var(--text-secondary)' }}
-                        >
-                          What problem were you trying to solve? *
-                        </label>
-                        <VoiceInputPlaceholder />
-                      </div>
-                      <textarea
-                        ref={el => { textareaRefs.current[`problem_${projectId}`] = el }}
-                        value={update.problem_to_solve}
-                        onChange={(e) => updateProjectUpdate(projectId, 'problem_to_solve', e.target.value)}
-                        onFocus={() => setActiveTextareaId(`problem_${projectId}`)}
-                        placeholder="Describe the challenge or goal you were working on..."
-                        rows={3}
-                        className="w-full px-4 py-3 rounded-xl text-sm resize-y transition-all duration-200"
-                        style={{
-                          background: 'var(--bg-card)',
-                          border: '1px solid var(--border-default)',
-                          color: 'var(--text-primary)',
-                        }}
-                      />
-                      {activeTextareaId === `problem_${projectId}` && (
-                        <div className="mt-2">
-                          <QuestionPills dayType={dayType} onPillClick={handlePillClick} category="problem" />
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Optional: What didn't work */}
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <label
-                          className="text-sm font-medium"
-                          style={{ color: 'var(--text-secondary)' }}
-                        >
-                          What didn&apos;t work? (optional)
-                        </label>
-                        <VoiceInputPlaceholder />
-                      </div>
-                      <textarea
-                        ref={el => { textareaRefs.current[`didntwork_${projectId}`] = el }}
-                        value={update.what_didnt_work}
-                        onChange={(e) => updateProjectUpdate(projectId, 'what_didnt_work', e.target.value)}
-                        onFocus={() => setActiveTextareaId(`didntwork_${projectId}`)}
-                        placeholder="Approaches that failed or dead ends..."
-                        rows={2}
-                        className="w-full px-4 py-3 rounded-xl text-sm resize-y transition-all duration-200"
-                        style={{
-                          background: 'var(--bg-card)',
-                          border: '1px solid var(--border-default)',
-                          color: 'var(--text-primary)',
-                        }}
-                      />
-                    </div>
-
-                    {/* Optional: What worked */}
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <label
-                          className="text-sm font-medium"
-                          style={{ color: 'var(--text-secondary)' }}
-                        >
-                          What finally worked? (optional)
-                        </label>
-                        <VoiceInputPlaceholder />
-                      </div>
-                      <textarea
-                        ref={el => { textareaRefs.current[`worked_${projectId}`] = el }}
-                        value={update.what_worked}
-                        onChange={(e) => updateProjectUpdate(projectId, 'what_worked', e.target.value)}
-                        onFocus={() => setActiveTextareaId(`worked_${projectId}`)}
-                        placeholder="The solution or approach that succeeded..."
-                        rows={2}
-                        className="w-full px-4 py-3 rounded-xl text-sm resize-y transition-all duration-200"
-                        style={{
-                          background: 'var(--bg-card)',
-                          border: '1px solid var(--border-default)',
-                          color: 'var(--text-primary)',
-                        }}
-                      />
-                      {activeTextareaId === `worked_${projectId}` && (
-                        <div className="mt-2">
-                          <QuestionPills dayType={dayType} onPillClick={handlePillClick} category="solution" />
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Optional: Surprise learning */}
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <label
-                          className="text-sm font-medium"
-                          style={{ color: 'var(--text-secondary)' }}
-                        >
-                          Any surprises? (optional)
-                        </label>
-                        <VoiceInputPlaceholder />
-                      </div>
-                      <textarea
-                        ref={el => { textareaRefs.current[`surprise_${projectId}`] = el }}
-                        value={update.surprise_learning}
-                        onChange={(e) => updateProjectUpdate(projectId, 'surprise_learning', e.target.value)}
-                        onFocus={() => setActiveTextareaId(`surprise_${projectId}`)}
-                        placeholder="Unexpected discoveries or learnings..."
-                        rows={2}
-                        className="w-full px-4 py-3 rounded-xl text-sm resize-y transition-all duration-200"
-                        style={{
-                          background: 'var(--bg-card)',
-                          border: '1px solid var(--border-default)',
-                          color: 'var(--text-primary)',
-                        }}
-                      />
-                      {activeTextareaId === `surprise_${projectId}` && (
-                        <div className="mt-2">
-                          <QuestionPills dayType={dayType} onPillClick={handlePillClick} category="learning" />
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Win/Blocker toggles */}
-                    <div className="flex flex-wrap gap-3 pt-2">
-                      <button
-                        type="button"
-                        onClick={() => updateProjectUpdate(projectId, 'is_win', !update.is_win)}
-                        className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200"
-                        style={{
-                          background: update.is_win ? 'rgba(245, 158, 11, 0.15)' : 'var(--bg-card)',
-                          border: `1px solid ${update.is_win ? 'var(--accent-amber)' : 'var(--border-default)'}`,
-                          color: update.is_win ? 'var(--accent-amber)' : 'var(--text-secondary)',
-                        }}
-                      >
-                        <Star className={`w-4 h-4 ${update.is_win ? 'fill-current' : ''}`} />
-                        Mark as win
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => updateProjectUpdate(projectId, 'is_blocker', !update.is_blocker)}
-                        className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200"
-                        style={{
-                          background: update.is_blocker ? 'rgba(255, 107, 107, 0.15)' : 'var(--bg-card)',
-                          border: `1px solid ${update.is_blocker ? 'var(--accent-coral)' : 'var(--border-default)'}`,
-                          color: update.is_blocker ? 'var(--accent-coral)' : 'var(--text-secondary)',
-                        }}
-                      >
-                        <AlertTriangle className="w-4 h-4" />
-                        Flag blocker
-                      </button>
-                    </div>
-
-                    {update.is_blocker && (
-                      <input
-                        type="text"
-                        value={update.blocker_description}
-                        onChange={(e) => updateProjectUpdate(projectId, 'blocker_description', e.target.value)}
-                        placeholder="What's blocking you?"
-                        className="w-full px-4 py-3 rounded-xl text-sm transition-all duration-200"
-                        style={{
-                          background: 'var(--bg-card)',
-                          border: '1px solid var(--accent-coral)',
-                          color: 'var(--text-primary)',
-                        }}
-                      />
-                    )}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </section>
-
-      {/* Section 2: Breakthroughs */}
-      <section
-        className="p-8 rounded-2xl animate-fade-in-up-delay-2"
-        style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}
-      >
-        <div className="flex items-center gap-3 mb-6">
-          <div
-            className="w-12 h-12 rounded-xl flex items-center justify-center"
-            style={{ background: 'rgba(245, 158, 11, 0.15)' }}
+        {/* Content flags */}
+        <div className="flex flex-wrap gap-3 pt-1">
+          <label
+            className="flex items-center gap-2 px-4 py-2 rounded-lg cursor-pointer transition-all duration-200"
+            style={{
+              background: flagYoutube ? 'rgba(255, 0, 0, 0.1)' : 'var(--bg-elevated)',
+              border: `1px solid ${flagYoutube ? '#ff0000' : 'var(--border-default)'}`,
+            }}
           >
-            <Sparkles className="w-6 h-6" style={{ color: 'var(--accent-amber)' }} />
-          </div>
-          <div>
-            <h2
-              className="text-xl font-semibold"
-              style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}
-            >
-              Any major wins or discoveries today?
-            </h2>
-            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-              Capture your breakthroughs for content ideas
-            </p>
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          <div className="flex items-start gap-2">
-            <textarea
-              ref={el => { textareaRefs.current['breakthroughs'] = el }}
-              value={breakthroughs}
-              onChange={(e) => setBreakthroughs(e.target.value)}
-              onFocus={() => setActiveTextareaId('breakthroughs')}
-              placeholder="Describe any major wins, 'aha' moments, or discoveries..."
-              rows={4}
-              className="flex-1 px-5 py-4 rounded-xl text-base resize-y transition-all duration-200 min-h-[120px]"
-              style={{
-                background: 'var(--bg-elevated)',
-                border: '1px solid var(--border-default)',
-                color: 'var(--text-primary)',
-              }}
+            <input
+              type="checkbox"
+              checked={flagYoutube}
+              onChange={(e) => setFlagYoutube(e.target.checked)}
+              className="sr-only"
             />
-            <VoiceInputPlaceholder className="mt-4" />
-          </div>
-
-          {activeTextareaId === 'breakthroughs' && (
-            <QuestionPills dayType={dayType} onPillClick={handlePillClick} />
-          )}
-
-          {/* Content flags */}
-          <div className="flex flex-wrap gap-4 pt-2">
-            <label
-              className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer transition-all duration-200 hover:scale-[1.01]"
-              style={{
-                background: flagYoutube ? 'rgba(255, 0, 0, 0.1)' : 'var(--bg-elevated)',
-                border: `1px solid ${flagYoutube ? '#ff0000' : 'var(--border-default)'}`,
-              }}
+            <Youtube
+              className="w-4 h-4"
+              style={{ color: flagYoutube ? '#ff0000' : 'var(--text-muted)' }}
+            />
+            <span
+              className="text-sm"
+              style={{ color: flagYoutube ? '#ff0000' : 'var(--text-secondary)' }}
             >
-              <input
-                type="checkbox"
-                checked={flagYoutube}
-                onChange={(e) => setFlagYoutube(e.target.checked)}
-                className="sr-only"
-              />
-              <Youtube
-                className="w-5 h-5"
-                style={{ color: flagYoutube ? '#ff0000' : 'var(--text-muted)' }}
-              />
-              <span
-                className="text-sm font-medium"
-                style={{ color: flagYoutube ? '#ff0000' : 'var(--text-secondary)' }}
-              >
-                This deserves a YouTube tutorial
-              </span>
-            </label>
+              YouTube tutorial
+            </span>
+          </label>
 
-            <label
-              className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer transition-all duration-200 hover:scale-[1.01]"
-              style={{
-                background: flagLinkedin ? 'rgba(10, 102, 194, 0.1)' : 'var(--bg-elevated)',
-                border: `1px solid ${flagLinkedin ? '#0a66c2' : 'var(--border-default)'}`,
-              }}
+          <label
+            className="flex items-center gap-2 px-4 py-2 rounded-lg cursor-pointer transition-all duration-200"
+            style={{
+              background: flagLinkedin ? 'rgba(10, 102, 194, 0.1)' : 'var(--bg-elevated)',
+              border: `1px solid ${flagLinkedin ? '#0a66c2' : 'var(--border-default)'}`,
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={flagLinkedin}
+              onChange={(e) => setFlagLinkedin(e.target.checked)}
+              className="sr-only"
+            />
+            <Linkedin
+              className="w-4 h-4"
+              style={{ color: flagLinkedin ? '#0a66c2' : 'var(--text-muted)' }}
+            />
+            <span
+              className="text-sm"
+              style={{ color: flagLinkedin ? '#0a66c2' : 'var(--text-secondary)' }}
             >
-              <input
-                type="checkbox"
-                checked={flagLinkedin}
-                onChange={(e) => setFlagLinkedin(e.target.checked)}
-                className="sr-only"
-              />
-              <Linkedin
-                className="w-5 h-5"
-                style={{ color: flagLinkedin ? '#0a66c2' : 'var(--text-muted)' }}
-              />
-              <span
-                className="text-sm font-medium"
-                style={{ color: flagLinkedin ? '#0a66c2' : 'var(--text-secondary)' }}
-              >
-                This deserves a LinkedIn post
-              </span>
-            </label>
-          </div>
+              LinkedIn post
+            </span>
+          </label>
         </div>
       </section>
 
-      {/* Section 3: Screenshots & Recordings */}
-      <section
-        className="p-8 rounded-2xl animate-fade-in-up-delay-2"
-        style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}
-      >
-        <div className="flex items-center gap-3 mb-6">
-          <div
-            className="w-12 h-12 rounded-xl flex items-center justify-center"
-            style={{ background: 'rgba(45, 212, 191, 0.15)' }}
-          >
-            <FileText className="w-6 h-6" style={{ color: 'var(--accent-teal)' }} />
-          </div>
-          <div>
-            <h2
-              className="text-xl font-semibold"
-              style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}
-            >
-              Screenshots & Recordings
-            </h2>
-            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-              Visual proof of your progress
-            </p>
-          </div>
-        </div>
+      {/* Divider */}
+      <div style={{ borderTop: '1px solid var(--border-subtle)' }} />
 
+      {/* In my own words */}
+      <section className="space-y-3 animate-fade-in-up-delay-2">
+        <div className="flex items-center gap-3">
+          <Quote className="w-5 h-5" style={{ color: 'var(--accent-coral)' }} />
+          <label
+            className="text-base font-semibold"
+            style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}
+          >
+            In my own words
+          </label>
+          <div className="relative group">
+            <HelpCircle
+              className="w-4 h-4 cursor-help"
+              style={{ color: 'var(--text-muted)' }}
+            />
+            <div
+              className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 rounded-lg text-xs whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-50"
+              style={{
+                background: 'var(--bg-card)',
+                border: '1px solid var(--border-default)',
+                color: 'var(--text-secondary)',
+                boxShadow: 'var(--shadow-md)',
+              }}
+            >
+              The AI will preserve these phrases
+            </div>
+          </div>
+          <VoiceInputPlaceholder />
+        </div>
+        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+          Any phrases or wording you want the AI to pay particular attention to. These won&apos;t be changed significantly when generating content.
+        </p>
+        <AutoExpandingTextarea
+          value={inMyOwnWords}
+          onChange={setInMyOwnWords}
+          placeholder="Key phrases to keep verbatim..."
+          minRows={2}
+          maxRows={6}
+          style={{ fontStyle: 'italic' }}
+        />
+      </section>
+
+      {/* Divider */}
+      <div style={{ borderTop: '1px solid var(--border-subtle)' }} />
+
+      {/* Screenshots & Files */}
+      <section className="space-y-3 animate-fade-in-up-delay-3">
+        <div className="flex items-center gap-3">
+          <ImageIcon className="w-5 h-5" style={{ color: 'var(--accent-teal)' }} />
+          <label
+            className="text-base font-semibold"
+            style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}
+          >
+            Screenshots & Files
+          </label>
+        </div>
         {userId && (
           <FileUpload
             userId={userId}
@@ -767,122 +691,8 @@ export default function CheckInPage() {
         )}
       </section>
 
-      {/* Section 4: In My Own Words */}
-      <section
-        className="p-8 rounded-2xl animate-fade-in-up-delay-3"
-        style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}
-      >
-        <div className="flex items-center gap-3 mb-6">
-          <div
-            className="w-12 h-12 rounded-xl flex items-center justify-center"
-            style={{ background: 'rgba(255, 107, 107, 0.15)' }}
-          >
-            <Quote className="w-6 h-6" style={{ color: 'var(--accent-coral)' }} />
-          </div>
-          <div className="flex-1">
-            <div className="flex items-center gap-2">
-              <h2
-                className="text-xl font-semibold"
-                style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}
-              >
-                In My Own Words
-              </h2>
-              <div className="relative group">
-                <HelpCircle
-                  className="w-4 h-4 cursor-help"
-                  style={{ color: 'var(--text-muted)' }}
-                />
-                <div
-                  className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 rounded-lg text-xs whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-50"
-                  style={{
-                    background: 'var(--bg-card)',
-                    border: '1px solid var(--border-default)',
-                    color: 'var(--text-secondary)',
-                    boxShadow: 'var(--shadow-md)',
-                  }}
-                >
-                  The AI will keep these verbatim in your content
-                </div>
-              </div>
-            </div>
-            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-              Any phrases or quotes you want preserved exactly?
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-start gap-2">
-          <textarea
-            ref={el => { textareaRefs.current['inMyOwnWords'] = el }}
-            value={inMyOwnWords}
-            onChange={(e) => setInMyOwnWords(e.target.value)}
-            onFocus={() => setActiveTextareaId('inMyOwnWords')}
-            placeholder="&quot;This is exactly how I'd describe it...&quot; or key phrases you want to keep word-for-word"
-            rows={3}
-            className="flex-1 px-5 py-4 rounded-xl text-base resize-y transition-all duration-200"
-            style={{
-              background: 'var(--bg-elevated)',
-              border: '1px solid var(--border-default)',
-              color: 'var(--text-primary)',
-              fontStyle: 'italic',
-            }}
-          />
-          <VoiceInputPlaceholder className="mt-4" />
-        </div>
-      </section>
-
-      {/* Section 5: General Notes */}
-      <section
-        className="p-8 rounded-2xl animate-fade-in-up-delay-3"
-        style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}
-      >
-        <div className="flex items-center gap-3 mb-6">
-          <div
-            className="w-12 h-12 rounded-xl flex items-center justify-center"
-            style={{ background: 'rgba(45, 212, 191, 0.15)' }}
-          >
-            <FileText className="w-6 h-6" style={{ color: 'var(--accent-teal)' }} />
-          </div>
-          <div>
-            <h2
-              className="text-xl font-semibold"
-              style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}
-            >
-              General Notes
-            </h2>
-            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-              Anything else on your mind?
-            </p>
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          <div className="flex items-start gap-2">
-            <textarea
-              ref={el => { textareaRefs.current['generalNotes'] = el }}
-              value={generalNotes}
-              onChange={(e) => setGeneralNotes(e.target.value)}
-              onFocus={() => setActiveTextareaId('generalNotes')}
-              placeholder="Thoughts, reflections, or anything not specific to a project..."
-              rows={4}
-              className="flex-1 px-5 py-4 rounded-xl text-base resize-y transition-all duration-200 min-h-[120px]"
-              style={{
-                background: 'var(--bg-elevated)',
-                border: '1px solid var(--border-default)',
-                color: 'var(--text-primary)',
-              }}
-            />
-            <VoiceInputPlaceholder className="mt-4" />
-          </div>
-
-          {activeTextareaId === 'generalNotes' && (
-            <QuestionPills dayType={dayType} onPillClick={handlePillClick} />
-          )}
-        </div>
-      </section>
-
       {/* Save button */}
-      <div className="flex justify-end pt-6 pb-8">
+      <div className="flex justify-end pt-4 pb-8">
         <button
           type="button"
           onClick={handleSave}
@@ -902,7 +712,7 @@ export default function CheckInPage() {
           ) : (
             <>
               <Save className="w-5 h-5" />
-              Save Check-in
+              Save Update
             </>
           )}
         </button>
